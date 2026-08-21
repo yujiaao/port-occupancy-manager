@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>端口占用管理器 · Port Inspector</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: rgba(22, 27, 38, 0.72);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text: #e6e9ef;
+    --muted: #8b93a7;
+    --accent: #4f9dff;
+    --accent2: #9b6bff;
+    --danger: #ff5d6c;
+    --ok: #38d39f;
+    --warn: #ffb454;
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    overflow-x: hidden;
+  }
+  /* 背景光斑 */
+  .bg-orbs { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
+  .bg-orbs span {
+    position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.35;
+  }
+  .bg-orbs .o1 { width: 460px; height: 460px; background: #2b6fff; top: -120px; left: -80px; }
+  .bg-orbs .o2 { width: 420px; height: 420px; background: #8a4bff; bottom: -140px; right: -60px; }
+  .bg-orbs .o3 { width: 300px; height: 300px; background: #16b59a; top: 40%; left: 55%; opacity: 0.18; }
+
+  .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 32px 22px 60px; }
+
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .logo {
+    width: 46px; height: 46px; border-radius: 13px; flex: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: grid; place-items: center; box-shadow: 0 8px 24px rgba(79,157,255,0.35);
+  }
+  .logo svg { width: 26px; height: 26px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: 0.3px; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
+
+  /* 统计卡片 */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 16px; padding: 16px 18px; backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
+  }
+  .stat .k { color: var(--muted); font-size: 12px; }
+  .stat .v { font-size: 28px; font-weight: 700; margin-top: 6px; }
+  .stat.c1 .v { color: var(--accent); }
+  .stat.c2 .v { color: var(--accent2); }
+  .stat.c3 .v { color: var(--ok); }
+  .stat.c4 .v { color: var(--warn); }
+
+  /* 工具条 */
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow); margin-bottom: 16px;
+  }
+  .search {
+    flex: 1 1 260px; display: flex; align-items: center; gap: 8px;
+    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border);
+    border-radius: 11px; padding: 9px 12px;
+  }
+  .search input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 14px; }
+  .search svg { width: 16px; height: 16px; opacity: 0.6; }
+  .seg { display: flex; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); border-radius: 11px; padding: 3px; }
+  .seg button {
+    border: none; background: none; color: var(--muted); cursor: pointer;
+    padding: 7px 14px; border-radius: 8px; font-size: 13px; transition: 0.15s;
+  }
+  .seg button.active { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
+  .btn {
+    border: 1px solid var(--panel-border); background: rgba(255,255,255,0.05); color: var(--text);
+    padding: 9px 14px; border-radius: 11px; cursor: pointer; font-size: 13px; transition: 0.15s;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn:hover { background: rgba(255,255,255,0.12); }
+  .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; color: #fff; }
+  .btn.ghost { padding: 8px 12px; font-size: 12px; }
+  .switch { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .switch input { width: 36px; height: 20px; appearance: none; background: rgba(255,255,255,0.15); border-radius: 20px; position: relative; cursor: pointer; transition: 0.2s; }
+  .switch input:checked { background: var(--accent); }
+  .switch input::after { content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: 0.2s; }
+  .switch input:checked::after { left: 18px; }
+  .divider { width: 1px; height: 26px; background: var(--panel-border); }
+
+  /* 按端口终止面板 */
+  .quickbar {
+    background: var(--panel); border: 1px solid rgba(255,93,108,0.25);
+    border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow); margin-bottom: 16px;
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  }
+  .quickbar .qb-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .quickbar .qb-title svg { width: 17px; height: 17px; color: var(--danger); }
+  .qb-row { display: flex; gap: 8px; align-items: center; }
+  .qb-row input {
+    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); border-radius: 11px;
+    padding: 9px 12px; color: var(--text); font-size: 14px; width: 150px; outline: none;
+  }
+  .qb-row input:focus { border-color: var(--accent); }
+  .btn.danger { background: var(--danger); border: none; color: #fff; }
+  .btn.danger:hover { filter: brightness(1.08); }
+  .qb-hint { color: var(--muted); font-size: 12px; flex: 1 1 200px; }
+
+  /* 表格 */
+  .tablecard {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow); overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  thead th {
+    text-align: left; color: var(--muted); font-weight: 600; font-size: 12px;
+    padding: 13px 16px; border-bottom: 1px solid var(--panel-border); white-space: nowrap;
+  }
+  tbody td { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  tbody tr:hover { background: rgba(255,255,255,0.035); }
+  .tag { display: inline-block; padding: 2px 9px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+  .tag.tcp { background: rgba(79,157,255,0.16); color: var(--accent); }
+  .tag.udp { background: rgba(155,107,255,0.16); color: var(--accent2); }
+  .tag.listen { background: rgba(56,211,159,0.16); color: var(--ok); }
+  .tag.other { background: rgba(255,180,84,0.14); color: var(--warn); }
+  .pid { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .kill {
+    border: 1px solid rgba(255,93,108,0.4); background: rgba(255,93,108,0.12); color: var(--danger);
+    padding: 6px 13px; border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 600; transition: 0.15s;
+  }
+  .kill:hover { background: var(--danger); color: #fff; }
+  .empty { padding: 50px; text-align: center; color: var(--muted); }
+  .name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 弹窗 */
+  .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; z-index: 50; place-items: center; backdrop-filter: blur(4px); }
+  .modal-mask.show { display: grid; }
+  .modal { width: 420px; max-width: 92vw; max-height: 86vh; overflow: auto; background: #161b26; border: 1px solid var(--panel-border); border-radius: 16px; padding: 22px; box-shadow: var(--shadow); }
+  .modal h3 { margin: 0 0 12px; font-size: 17px; }
+  .modal p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 6px 0; }
+  .modal .hl { color: var(--text); font-weight: 600; }
+  .modal .warnbox { color: var(--warn); }
+  .proc-list { margin: 10px 0 4px; border: 1px solid var(--panel-border); border-radius: 11px; overflow: hidden; }
+  .proc-list .row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 13px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
+  .proc-list .row:last-child { border-bottom: none; }
+  .proc-list .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proc-list .ppid { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+  .btn.danger:hover { filter: brightness(1.08); }
+
+  /* toast */
+  #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; transition: 0.25s; z-index: 60; }
+  #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  #toast .box { background: #1c2230; border: 1px solid var(--panel-border); color: var(--text); padding: 12px 18px; border-radius: 11px; box-shadow: var(--shadow); font-size: 13px; display: flex; gap: 9px; align-items: center; max-width: 80vw; }
+  #toast .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  #toast.ok .dot { background: var(--ok); }
+  #toast.err .dot { background: var(--danger); }
+
+  .spin { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff; border-radius: 50%; animation: sp 0.7s linear infinite; display: inline-block; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  @media (max-width: 720px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .qb-hint { flex-basis: 100%; }
+  }
+</style>
+</head>
+<body>
+  <div class="bg-orbs"><span class="o1"></span><span class="o2"></span><span class="o3"></span></div>
+
+  <div class="wrap">
+    <header>
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="18" rx="2"/><path d="M7 8h10M7 12h6M7 16h8"/>
+        </svg>
+      </div>
+      <div>
+        <h1>端口占用管理器</h1>
+        <div class="sub">查看本地端口占用 · 按需终止进程 · 零依赖本地工具</div>
+      </div>
+    </header>
+
+    <div class="stats">
+      <div class="stat c1"><div class="k">总连接</div><div class="v" id="s-total">0</div></div>
+      <div class="stat c2"><div class="k">TCP</div><div class="v" id="s-tcp">0</div></div>
+      <div class="stat c3"><div class="k">监听中</div><div class="v" id="s-listen">0</div></div>
+      <div class="stat c4"><div class="k">进程数</div><div class="v" id="s-proc">0</div></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="search" placeholder="搜索 端口 / 地址 / PID / 进程名…" />
+      </div>
+      <div class="seg" id="protoSeg">
+        <button data-proto="ALL" class="active">全部</button>
+        <button data-proto="TCP">TCP</button>
+        <button data-proto="UDP">UDP</button>
+      </div>
+      <label class="switch"><input type="checkbox" id="autoRefresh" /> 自动刷新</label>
+      <div class="divider"></div>
+      <button class="btn ghost" id="exportCsv">导出 CSV</button>
+      <button class="btn ghost" id="exportJson">导出 JSON</button>
+      <button class="btn primary" id="refreshBtn">刷新</button>
+    </div>
+
+    <div class="quickbar">
+      <div class="qb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+        按端口号一键终止
+      </div>
+      <div class="qb-row">
+        <input id="portInput" type="number" min="1" max="65535" placeholder="端口号，如 8080" />
+        <button class="btn danger" id="killPortBtn">查找并终止</button>
+      </div>
+      <div class="qb-hint">输入端口号，自动定位占用该端口的全部进程并批量终止（仍会二次确认）</div>
+    </div>
+
+    <div class="tablecard">
+      <table>
+        <thead>
+          <tr><th>协议</th><th>本地地址</th><th>状态</th><th>PID</th><th>进程名</th><th style="text-align:right">操作</th></tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty" id="empty" style="display:none">没有匹配的端口占用</div>
+    </div>
+  </div>
+
+  <!-- 确认弹窗 -->
+  <div class="modal-mask" id="modal">
+    <div class="modal">
+      <h3 id="m-title">确认终止进程？</h3>
+      <div id="m-body"></div>
+      <div class="actions">
+        <button class="btn" id="m-cancel">取消</button>
+        <button class="btn danger" id="m-confirm">确认终止</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"><div class="box"><span class="dot"></span><span id="toast-msg"></span></div></div>
+
+<script>
+  let allPorts = [];
+  let curProto = "ALL";
+  let autoTimer = null;
+  let pending = null; // {type:'pid', pid} | {type:'port', port, items}
+
+  const $ = (id) => document.getElementById(id);
+
+  async function fetchPorts() {
+    const btn = $("refreshBtn");
+    btn.innerHTML = '<span class="spin"></span> 刷新中';
+    try {
+      const res = await fetch("/api/ports", { cache: "no-store" });
+      const data = await res.json();
+      allPorts = data.ports || [];
+      render();
+    } catch (e) {
+      toast("获取端口失败：" + e.message, false);
+    } finally {
+      btn.textContent = "刷新";
+    }
+  }
+
+  function render() {
+    const q = $("search").value.trim().toLowerCase();
+    const rows = allPorts.filter(p => {
+      if (curProto !== "ALL" && p.protocol !== curProto) return false;
+      if (!q) return true;
+      return (p.local + " " + p.pid + " " + (p.name || "")).toLowerCase().includes(q);
+    });
+
+    // 统计
+    const tcp = allPorts.filter(p => p.protocol === "TCP").length;
+    const listen = allPorts.filter(p => (p.state || "").toUpperCase() === "LISTENING" || (p.state || "").toUpperCase() === "LISTEN").length;
+    const procs = new Set(allPorts.map(p => p.pid)).size;
+    $("s-total").textContent = allPorts.length;
+    $("s-tcp").textContent = tcp;
+    $("s-listen").textContent = listen;
+    $("s-proc").textContent = procs;
+
+    const tbody = $("tbody");
+    tbody.innerHTML = "";
+    $("empty").style.display = rows.length ? "none" : "block";
+
+    for (const p of rows) {
+      const tr = document.createElement("tr");
+      const protoTag = `<span class="tag ${p.protocol.toLowerCase()}">${p.protocol}</span>`;
+      const st = (p.state || "").toUpperCase();
+      const stateTag = st === "LISTENING" || st === "LISTEN"
+        ? `<span class="tag listen">${p.state}</span>`
+        : (p.state ? `<span class="tag other">${p.state}</span>` : '<span class="muted">—</span>');
+      tr.innerHTML = `
+        <td>${protoTag}</td>
+        <td>${p.local}</td>
+        <td>${stateTag}</td>
+        <td class="pid">${p.pid}</td>
+        <td class="name" title="${p.name || ''}">${p.name || "—"}</td>
+        <td style="text-align:right"><button class="kill" data-pid="${p.pid}" data-name="${p.name || ''}" data-port="${p.local}">终止</button></td>`;
+      tbody.appendChild(tr);
+    }
+  }
+
+  // 事件委托：终止按钮
+  $("tbody").addEventListener("click", (e) => {
+    const b = e.target.closest(".kill");
+    if (!b) return;
+    openKillPid(b.dataset.pid, b.dataset.name, b.dataset.port);
+  });
+
+  function openKillPid(pid, name, port) {
+    pending = { type: "pid", pid };
+    $("m-title").textContent = "确认终止进程？";
+    $("m-body").innerHTML = `
+      <p>即将终止进程 <span class="hl">${name || "未知进程"}</span></p>
+      <p>PID：<span class="hl">${pid}</span> ｜ 占用：<span class="hl">${port}</span></p>
+      <p class="warnbox">该操作不可撤销，进程将被强制结束（含其子进程）。</p>`;
+    $("modal").classList.add("show");
+  }
+
+  function openKillPort(port, items) {
+    pending = { type: "port", port, items };
+    const rows = items.map(it =>
+      `<div class="row"><span class="pname">${it.name || "未知进程"} · ${it.local}</span><span class="ppid">PID ${it.pid}</span></div>`
+    ).join("");
+    $("m-title").textContent = `确认终止端口 ${port} 上的全部进程？`;
+    $("m-body").innerHTML = `
+      <p>以下进程正在占用端口 <span class="hl">${port}</span>（共 ${items.length} 个）：</p>
+      <div class="proc-list">${rows}</div>
+      <p class="warnbox">该操作不可撤销，这些进程将被强制结束（含其子进程）。</p>`;
+    $("modal").classList.add("show");
+  }
+
+  function closeModal() { $("modal").classList.remove("show"); pending = null; }
+
+  $("m-cancel").onclick = closeModal;
+  $("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
+
+  $("m-confirm").onclick = async () => {
+    if (!pending) return;
+    const task = pending;
+    closeModal();
+    try {
+      let res, data;
+      if (task.type === "pid") {
+        res = await fetch("/api/kill", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pid: Number(task.pid) })
+        });
+        data = await res.json();
+        if (data.success) toast(`已终止 PID ${task.pid}`, true);
+        else toast("终止失败：" + (data.error || data.message || "未知错误"), false);
+      } else {
+        res = await fetch("/api/kill_port", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ port: Number(task.port) })
+        });
+        data = await res.json();
+        if (data.success) toast(`端口 ${task.port} 已清理：${data.killed.length} 个进程已终止` + (data.skipped.length ? `，${data.skipped.length} 个跳过` : ""), true);
+        else toast("终止失败：" + (data.error || "未知错误"), false);
+      }
+    } catch (e) {
+      toast("请求失败：" + e.message, false);
+    } finally {
+      setTimeout(fetchPorts, 500);
+    }
+  };
+
+  // 按端口号终止
+  $("killPortBtn").onclick = async () => {
+    const port = parseInt($("portInput").value, 10);
+    if (!port || port < 1 || port > 65535) { toast("请输入有效的端口号（1-65535）", false); return; }
+    const btn = $("killPortBtn");
+    btn.innerHTML = '<span class="spin"></span> 查找中';
+    try {
+      const res = await fetch("/api/ports", { cache: "no-store" });
+      const data = await res.json();
+      const items = (data.ports || []).filter(p => {
+        const lp = p.local.split(":").pop();
+        return parseInt(lp, 10) === port;
+      });
+      if (!items.length) { toast(`端口 ${port} 上未发现任何连接`, false); return; }
+      openKillPort(port, items);
+    } catch (e) {
+      toast("查询失败：" + e.message, false);
+    } finally {
+      btn.textContent = "查找并终止";
+    }
+  };
+  $("portInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("killPortBtn").click(); });
+
+  // 导出
+  function download(filename, text, mime) {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+  $("exportCsv").onclick = () => {
+    if (!allPorts.length) { toast("当前没有数据可导出", false); return; }
+    const header = ["协议", "本地地址", "状态", "PID", "进程名"];
+    const lines = [header.join(",")];
+    for (const p of allPorts) {
+      const row = [p.protocol, p.local, p.state || "", p.pid, p.name || ""]
+        .map(v => `"${String(v).replace(/"/g, '""')}"`);
+      lines.push(row.join(","));
+    }
+    // BOM 让 Excel 正确识别中文
+    download(`ports_${Date.now()}.csv`, "﻿" + lines.join("\r\n"), "text/csv;charset=utf-8");
+    toast(`已导出 ${allPorts.length} 条到 CSV`, true);
+  };
+  $("exportJson").onclick = () => {
+    if (!allPorts.length) { toast("当前没有数据可导出", false); return; }
+    download(`ports_${Date.now()}.json`, JSON.stringify(allPorts, null, 2), "application/json");
+    toast(`已导出 ${allPorts.length} 条到 JSON`, true);
+  };
+
+  // 搜索 / 筛选
+  $("search").addEventListener("input", render);
+  $("protoSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    [...$("protoSeg").children].forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    curProto = b.dataset.proto;
+    render();
+  });
+
+  $("refreshBtn").onclick = fetchPorts;
+  $("autoRefresh").addEventListener("change", (e) => {
+    if (e.target.checked) { autoTimer = setInterval(fetchPorts, 3000); }
+    else { clearInterval(autoTimer); autoTimer = null; }
+  });
+
+  let toastTimer = null;
+  function toast(msg, ok) {
+    const t = $("toast");
+    t.className = ok ? "ok" : "err";
+    $("toast-msg").textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 2800);
+  }
+
+  fetchPorts();
+</script>
+</body>
+</html>
