@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 480" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f1226"/>
+      <stop offset="1" stop-color="#1a1340"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.04"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6d5dfc"/>
+      <stop offset="1" stop-color="#46c2ff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.2" cy="0.1" r="1">
+      <stop offset="0" stop-color="#6d5dfc" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#6d5dfc" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="760" height="480" fill="url(#bg)"/>
+  <rect width="760" height="480" fill="url(#glow)"/>
+
+  <!-- 标题 -->
+  <rect x="24" y="22" width="6" height="26" rx="3" fill="url(#accent)"/>
+  <text x="42" y="43" fill="#f2f4ff" font-size="20" font-weight="700">端口占用管理器</text>
+  <text x="42" y="62" fill="#9aa3c7" font-size="12">Port Occupancy Manager</text>
+  <rect x="620" y="28" width="116" height="30" rx="8" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.12"/>
+  <text x="636" y="48" fill="#cdd3f0" font-size="12">自动刷新 3s</text>
+
+  <!-- 统计卡片 -->
+  <g font-size="11">
+    <rect x="24" y="84" width="160" height="62" rx="12" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.10"/>
+    <text x="40" y="112" fill="#9aa3c7">总连接数</text>
+    <text x="40" y="136" fill="#f2f4ff" font-size="22" font-weight="700">948</text>
+
+    <rect x="200" y="84" width="160" height="62" rx="12" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.10"/>
+    <text x="216" y="112" fill="#9aa3c7">TCP</text>
+    <text x="216" y="136" fill="#46c2ff" font-size="22" font-weight="700">902</text>
+
+    <rect x="376" y="84" width="160" height="62" rx="12" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.10"/>
+    <text x="392" y="112" fill="#9aa3c7">监听</text>
+    <text x="392" y="136" fill="#7ef0c0" font-size="22" font-weight="700">156</text>
+
+    <rect x="552" y="84" width="184" height="62" rx="12" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.10"/>
+    <text x="568" y="112" fill="#9aa3c7">进程数</text>
+    <text x="568" y="136" fill="#f2f4ff" font-size="22" font-weight="700">213</text>
+  </g>
+
+  <!-- 表格 -->
+  <rect x="24" y="166" width="496" height="290" rx="14" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.10"/>
+  <text x="40" y="190" fill="#cdd3f0" font-size="13" font-weight="700">端口占用列表</text>
+  <!-- 表头 -->
+  <g font-size="11" fill="#9aa3c7">
+    <text x="40" y="212">协议</text>
+    <text x="104" y="212">本地地址</text>
+    <text x="236" y="212">状态</text>
+    <text x="316" y="212">PID</text>
+    <text x="372" y="212">进程名</text>
+  </g>
+  <line x1="40" y1="220" x2="504" y2="220" stroke="#ffffff" stroke-opacity="0.10"/>
+
+  <!-- 行 -->
+  <g font-size="12" fill="#e6e9f7">
+    <text x="40" y="244">TCP</text><text x="104" y="244">0.0.0.0:8080</text><text x="236" y="244" fill="#7ef0c0">LISTEN</text><text x="316" y="244">4820</text><text x="372" y="244">java.exe</text>
+    <text x="40" y="272">TCP</text><text x="104" y="272">127.0.0.1:5432</text><text x="236" y="272" fill="#7ef0c0">LISTEN</text><text x="316" y="272">2216</text><text x="372" y="272">postgres.exe</text>
+    <text x="40" y="300">TCP</text><text x="104" y="300">0.0.0.0:3000</text><text x="236" y="300" fill="#7ef0c0">LISTEN</text><text x="316" y="300">7344</text><text x="372" y="300">node.exe</text>
+    <text x="40" y="328">UDP</text><text x="104" y="328">0.0.0.0:5353</text><text x="236" y="328" fill="#9aa3c7">—</text><text x="316" y="328">1180</text><text x="372" y="328">svchost.exe</text>
+    <text x="40" y="356">TCP</text><text x="104" y="356">127.0.0.1:8765</text><text x="236" y="356" fill="#7ef0c0">LISTEN</text><text x="316" y="356">9024</text><text x="372" y="356">PortInspector</text>
+  </g>
+  <!-- 终止按钮示意 -->
+  <g>
+    <rect x="452" y="232" width="44" height="20" rx="6" fill="#ff5d6c" fill-opacity="0.18" stroke="#ff5d6c" stroke-opacity="0.5"/>
+    <text x="462" y="246" fill="#ff8a95" font-size="10">终止</text>
+    <rect x="452" y="260" width="44" height="20" rx="6" fill="#ff5d6c" fill-opacity="0.18" stroke="#ff5d6c" stroke-opacity="0.5"/>
+    <text x="462" y="274" fill="#ff8a95" font-size="10">终止</text>
+    <rect x="452" y="288" width="44" height="20" rx="6" fill="#ff5d6c" fill-opacity="0.18" stroke="#ff5d6c" stroke-opacity="0.5"/>
+    <text x="462" y="302" fill="#ff8a95" font-size="10">终止</text>
+  </g>
+  <text x="40" y="436" fill="#6f7699" font-size="11">搜索: 端口 / 地址 / PID / 进程名 …</text>
+
+  <!-- 按端口终止面板 -->
+  <rect x="540" y="166" width="196" height="290" rx="14" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.10"/>
+  <text x="556" y="190" fill="#cdd3f0" font-size="13" font-weight="700">按端口终止</text>
+  <rect x="556" y="204" width="164" height="34" rx="8" fill="#0c0f24" stroke="#ffffff" stroke-opacity="0.14"/>
+  <text x="568" y="226" fill="#9aa3c7" font-size="12">8080</text>
+  <rect x="556" y="248" width="164" height="34" rx="8" fill="url(#accent)"/>
+  <text x="596" y="270" fill="#ffffff" font-size="12" font-weight="700">查找占用进程</text>
+
+  <g font-size="11" fill="#9aa3c7">
+    <text x="556" y="312">将终止以下进程:</text>
+  </g>
+  <g font-size="11" fill="#e6e9f7">
+    <text x="556" y="334">· java.exe  (PID 4820)</text>
+    <text x="556" y="354">· node.exe  (PID 7344)</text>
+  </g>
+  <rect x="556" y="372" width="164" height="34" rx="8" fill="#ff5d6c"/>
+  <text x="600" y="394" fill="#ffffff" font-size="12" font-weight="700">确认终止</text>
+  <text x="556" y="430" fill="#6f7699" font-size="10">二次确认，强杀进程树</text>
+</svg>
