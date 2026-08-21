@@ -1,5 +1,9 @@
-dist/
+# 构建中间产物
 build/
 __pycache__/
 *.pyc
 .env
+
+# 发布产物：保留单文件 exe 作为可下载发布物
+dist/*
+!dist/PortInspector.exe
