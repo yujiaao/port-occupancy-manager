@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>系统内存哨兵 · SysMonitor</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: rgba(22, 27, 38, 0.72);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text: #e6e9ef;
+    --muted: #8b93a7;
+    --accent: #38d39f;      /* 主调：青 */
+    --accent2: #2bb3ff;
+    --violet: #9b6bff;
+    --danger: #ff5d6c;
+    --warn: #ffb454;
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+    --mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    overflow-x: hidden;
+  }
+  .bg-orbs { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
+  .bg-orbs span { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.3; }
+  .bg-orbs .o1 { width: 480px; height: 480px; background: #0f8f6e; top: -140px; left: -100px; }
+  .bg-orbs .o2 { width: 440px; height: 440px; background: #7a3cff; bottom: -150px; right: -80px; }
+  .bg-orbs .o3 { width: 300px; height: 300px; background: #1277c9; top: 45%; left: 58%; opacity: 0.16; }
+
+  .wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 26px 22px 60px; }
+
+  /* ---------- 顶栏 ---------- */
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+  .logo {
+    width: 46px; height: 46px; border-radius: 13px; flex: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: grid; place-items: center; box-shadow: 0 8px 24px rgba(56,211,159,0.35);
+  }
+  .logo svg { width: 25px; height: 25px; }
+  h1 { font-size: 21px; margin: 0; letter-spacing: 0.3px; }
+  h1 small { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 8px; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .head-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px;
+    border-radius: 999px; font-size: 13px; font-weight: 600; border: 1px solid var(--panel-border);
+    background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .badge .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .badge.st-ok .dot { background: var(--ok, var(--accent)); box-shadow: 0 0 8px var(--ok, var(--accent)); }
+  .badge.st-warn .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .badge.st-crit .dot { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: pulse 0.9s infinite; }
+  .badge.st-ok { color: var(--accent); }
+  .badge.st-warn { color: var(--warn); }
+  .badge.st-crit { color: var(--danger); }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+
+  .btn {
+    border: 1px solid var(--panel-border); background: rgba(255,255,255,0.05); color: var(--text);
+    padding: 8px 14px; border-radius: 11px; cursor: pointer; font-size: 13px; transition: 0.15s;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn:hover { background: rgba(255,255,255,0.12); }
+  .btn.ghost { background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .btn.danger { background: var(--danger); border: none; color: #fff; }
+  .btn.danger:hover { filter: brightness(1.1); }
+
+  /* ---------- 状态横幅 ---------- */
+  #banner {
+    display: flex; gap: 14px; align-items: flex-start; padding: 15px 18px; margin-bottom: 18px;
+    border-radius: 16px; border: 1px solid var(--panel-border); background: var(--panel);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
+    border-left: 4px solid var(--muted);
+  }
+  #banner.st-ok { border-left-color: var(--accent); }
+  #banner.st-warn { border-left-color: var(--warn); }
+  #banner.st-crit { border-left-color: var(--danger); background: linear-gradient(180deg, rgba(255,93,108,0.16), var(--panel)); }
+  #banner.st-off { border-left-color: var(--muted); }
+  .banner-ico { flex: none; width: 34px; height: 34px; margin-top: 2px; display: grid; place-items: center; }
+  #banner.st-ok .banner-ico svg { stroke: var(--accent); }
+  #banner.st-warn .banner-ico svg { stroke: var(--warn); }
+  #banner.st-crit .banner-ico svg { stroke: var(--danger); }
+  #banner.st-off .banner-ico svg { stroke: var(--muted); }
+  .banner-ico svg { width: 28px; height: 28px; }
+  #bannerTitle { font-size: 16px; font-weight: 700; margin: 0 0 3px; }
+  #bannerDesc { font-size: 13px; color: var(--muted); margin: 0 0 6px; line-height: 1.55; }
+  #bannerHint { font-size: 12px; color: var(--muted); opacity: 0.85; line-height: 1.6; }
+
+  /* ---------- 统计卡片 ---------- */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; margin-bottom: 16px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 15px;
+    padding: 14px 16px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
+  }
+  .stat .k { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .stat .v { font-size: 25px; font-weight: 700; margin-top: 5px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .stat .s { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.5; }
+  .stat .bar { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; margin-top: 9px; overflow: hidden; }
+  .stat .bar i { display: block; height: 100%; border-radius: 3px; transition: width 0.4s; }
+  .stat.c1 .v { color: var(--violet); }   /* commit 占用 */
+  .stat.c1 .bar i { background: linear-gradient(90deg, var(--violet), var(--accent2)); }
+  .stat.c2 .v { color: var(--accent2); }  /* 物理内存 */
+  .stat.c2 .bar i { background: linear-gradient(90deg, var(--accent2), var(--accent)); }
+  .stat.c3 .v { color: var(--warn); }     /* commit 剩余 */
+  .stat.c3 .bar i { background: linear-gradient(90deg, var(--warn), var(--accent)); }
+  .stat.c4 .v { color: var(--accent); }   /* 运行时长 */
+  .stat.hot .v { color: var(--danger); }
+  .stat.hot .bar i { background: var(--danger); }
+
+  /* ---------- 仪表条 ---------- */
+  .panel {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
+    padding: 15px 17px; margin-bottom: 16px;
+  }
+  .panel h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .panel h3 .sub { font-size: 11px; font-weight: 400; }
+  .gauge { display: grid; grid-template-columns: 118px 1fr 64px; align-items: center; gap: 12px; margin-bottom: 11px; }
+  .gauge:last-child { margin-bottom: 0; }
+  .gauge .g-name { font-size: 12px; color: var(--muted); }
+  .gauge .track { height: 10px; background: rgba(255,255,255,0.07); border-radius: 6px; overflow: hidden; }
+  .gauge .track i { display: block; height: 100%; border-radius: 6px; transition: width 0.5s, background 0.3s; }
+  .gauge .g-val { text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+
+  /* ---------- 趋势图 ---------- */
+  .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); align-items: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  canvas { display: block; width: 100%; height: 200px; }
+
+  /* ---------- 明细 KV ---------- */
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 13px; }
+  .kv dt { color: var(--muted); white-space: nowrap; }
+  .kv dd { margin: 0; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; text-align: right; word-break: break-all; }
+  .kv dd.big { color: var(--danger); font-weight: 700; }
+  .kv .sep { grid-column: 1 / -1; border-top: 1px dashed rgba(255,255,255,0.08); height: 0; padding: 0; }
+
+  /* ---------- 进程表 ---------- */
+  .tablecard { overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
+    padding: 10px 14px; border-bottom: 1px solid var(--panel-border); white-space: nowrap;
+  }
+  tbody td { padding: 8px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); font-variant-numeric: tabular-nums; }
+  tbody tr:hover { background: rgba(255,255,255,0.035); }
+  .rank { color: var(--muted); width: 34px; }
+  .pname { display: flex; align-items: center; gap: 9px; }
+  .pname .nm { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pname .pid { color: var(--muted); font-size: 11px; flex: none; }
+  .pname .icon { flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: rgba(255,255,255,0.07); font-size: 11px; }
+  .hot-lv0 { color: var(--text); }
+  .hot-lv1 { color: var(--warn); }
+  .hot-lv2 { color: var(--danger); font-weight: 700; }
+  .mb { text-align: right; font-family: var(--mono); }
+  .empty { padding: 34px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* ---------- 设置面板 ---------- */
+  details.setpanel { margin-bottom: 16px; }
+  details.setpanel > summary {
+    list-style: none; cursor: pointer; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 12px; padding: 10px 16px; font-size: 13px; backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px); box-shadow: var(--shadow); display: flex; align-items: center; gap: 9px;
+  }
+  details.setpanel > summary::-webkit-details-marker { display: none; }
+  details.setpanel > summary::after { content: "▾"; margin-left: auto; color: var(--muted); transition: 0.2s; }
+  details.setpanel[open] > summary::after { transform: rotate(180deg); }
+  .setgrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 12px;
+    margin-top: 12px; padding: 16px; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 0 0 12px 12px; border-top: none; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .setitem { display: flex; flex-direction: column; gap: 6px; }
+  .setitem label { font-size: 12px; color: var(--muted); }
+  .setitem input[type="number"] {
+    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text);
+    border-radius: 9px; padding: 7px 10px; font-size: 13px; outline: none; font-family: var(--mono);
+  }
+  .setitem input:focus { border-color: var(--accent2); }
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--text); cursor: pointer; }
+  .switch input { width: 34px; height: 19px; appearance: none; background: rgba(255,255,255,0.15); border-radius: 19px; position: relative; cursor: pointer; transition: 0.2s; flex: none; }
+  .switch input:checked { background: var(--accent); }
+  .switch input::after { content: ""; position: absolute; width: 15px; height: 15px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: 0.2s; }
+  .switch input:checked::after { left: 17px; }
+  .set-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; grid-column: 1 / -1; padding-top: 4px; }
+  .hint { font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+
+  /* ---------- 弹窗 / toast ---------- */
+  .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.62); display: none; z-index: 60; place-items: center; backdrop-filter: blur(5px); }
+  .modal-mask.show { display: grid; }
+  .modal {
+    width: 460px; max-width: 92vw; max-height: 86vh; overflow: auto;
+    background: #171c27; border: 1px solid rgba(255,93,108,0.5); border-radius: 16px; padding: 22px;
+    box-shadow: var(--shadow); animation: pop 0.22s ease;
+  }
+  @keyframes pop { from { transform: scale(0.92); opacity: 0; } }
+  .modal h3 { margin: 0 0 10px; font-size: 18px; display: flex; align-items: center; gap: 9px; color: var(--danger); }
+  .modal p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 5px 0; }
+  .modal ul { margin: 8px 0 12px; padding-left: 18px; color: var(--text); font-size: 13px; line-height: 1.7; }
+  .modal ul li::marker { color: var(--danger); }
+  .modal .hl { color: var(--text); font-weight: 600; }
+  .modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+  .modal .tip { background: rgba(255,180,84,0.1); border: 1px solid rgba(255,180,84,0.25); color: var(--warn);
+    border-radius: 10px; padding: 9px 12px; font-size: 12px; line-height: 1.6; margin-top: 6px; }
+
+  #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(24px); opacity: 0; transition: 0.25s; z-index: 70; pointer-events: none; }
+  #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  #toast .box { background: #1c2230; border: 1px solid var(--panel-border); color: var(--text); padding: 11px 17px;
+    border-radius: 11px; box-shadow: var(--shadow); font-size: 13px; display: flex; gap: 9px; align-items: center; max-width: 80vw; }
+  #toast .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  #toast.ok .dot { background: var(--accent); }
+  #toast.warn .dot { background: var(--warn); }
+  #toast.err .dot { background: var(--danger); }
+
+  footer { margin-top: 26px; color: var(--muted); font-size: 11.5px; line-height: 1.7; text-align: center; }
+
+  @media (max-width: 860px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .gauge { grid-template-columns: 90px 1fr 58px; }
+  }
+</style>
+</head>
+<body>
+<div class="bg-orbs"><span class="o1"></span><span class="o2"></span><span class="o3"></span></div>
+
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="4.4" height="18" rx="1.2"/><rect x="9.8" y="3" width="4.4" height="18" rx="1.2"/><rect x="16.6" y="3" width="4.4" height="18" rx="1.2"/>
+      </svg>
+    </div>
+    <div>
+      <h1>系统内存哨兵<small>SysMonitor</small></h1>
+      <div class="sub">监控 Windows 物理内存 / 提交空间（页面文件）/ 内存大户 · 阈值触发弹窗报警</div>
+    </div>
+    <div class="head-right">
+      <span class="badge" id="statusBadge"><span class="dot"></span><span id="badgeTxt">连接中…</span></span>
+      <button class="btn danger" id="testBtn">测试报警</button>
+      <details class="setpanel" id="setPanel" style="margin:0">
+        <summary>报警设置</summary>
+        <div class="setgrid">
+          <div class="setitem">
+            <label>轮询间隔（秒）</label>
+            <input type="number" data-key="refreshSec" min="1" max="60" step="1" />
+          </div>
+          <div class="setitem">
+            <label>警告阈值：提交空间剩余（GB）</label>
+            <input type="number" data-key="warnAvailGb" min="0.1" max="64" step="0.1" />
+          </div>
+          <div class="setitem">
+            <label>严重阈值：提交空间剩余（GB）</label>
+            <input type="number" data-key="critAvailGb" min="0.05" max="64" step="0.05" />
+          </div>
+          <div class="setitem">
+            <label>警告阈值：提交占用率（%）</label>
+            <input type="number" data-key="warnCommitPct" min="1" max="99" step="1" />
+          </div>
+          <div class="setitem">
+            <label>严重阈值：提交占用率（%）</label>
+            <input type="number" data-key="critCommitPct" min="1" max="99" step="1" />
+          </div>
+          <div class="setitem">
+            <label>警告阈值：物理内存剩余（GB）</label>
+            <input type="number" data-key="warnPhysGb" min="0.1" max="64" step="0.1" />
+          </div>
+          <div class="setitem">
+            <label>严重阈值：物理内存剩余（GB）</label>
+            <input type="number" data-key="critPhysGb" min="0.05" max="64" step="0.05" />
+          </div>
+          <div class="setitem">
+            <label>预计耗尽提醒（分钟，越短越紧急）</label>
+            <input type="number" data-key="predictWarnMin" min="5" max="600" step="5" />
+          </div>
+          <div class="setitem">
+            <label>按趋势预测“预计耗尽”判严重（分钟）</label>
+            <input type="number" data-key="predictCritMin" min="1" max="120" step="1" />
+          </div>
+          <div class="setitem">
+            <label>点“我知道了”后静默（分钟）</label>
+            <input type="number" data-key="snoozeMin" min="0" max="120" step="1" />
+          </div>
+          <label class="switch"><span>趋势预测报警</span><input type="checkbox" data-key="predict" /></label>
+          <label class="switch"><span>弹窗提醒</span><input type="checkbox" data-key="popup" /></label>
+          <label class="switch"><span>系统通知</span><input type="checkbox" data-key="notif" /></label>
+          <label class="switch"><span>声音提醒</span><input type="checkbox" data-key="sound" /></label>
+          <div class="set-actions">
+            <button class="btn" id="notifBtn">启用系统通知</button>
+            <button class="btn" id="resetBtn">恢复默认</button>
+            <span class="hint">说明：严重阈值触发时弹窗+通知+声音；命中任一条件即判定等级，恢复正常后自动复位。</span>
+          </div>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <!-- 状态横幅 -->
+  <div id="banner" class="st-off">
+    <div class="banner-ico">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 9v4M12 17h.01"/>
+        <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>
+      </svg>
+    </div>
+    <div style="min-width:0">
+      <h2 id="bannerTitle" style="font-size:16px;margin:0 0 3px;font-weight:700;">正在连接监控服务…</h2>
+      <p id="bannerDesc" style="margin:0;font-size:13px;color:var(--muted);line-height:1.55;"></p>
+      <p id="bannerHint" style="margin:6px 0 0;font-size:12px;color:var(--muted);opacity:.85;line-height:1.6;"></p>
+    </div>
+  </div>
+
+  <!-- 统计卡片 -->
+  <div class="stats">
+    <div class="stat c1" id="cardCommit">
+      <div class="k">提交空间占用（页面文件 Commit）</div>
+      <div class="v" id="st-commitPct">--</div>
+      <div class="s" id="st-commitSub">已提交 -- / 上限 --</div>
+      <div class="bar"><i id="barCommit"></i></div>
+    </div>
+    <div class="stat c2" id="cardPhys">
+      <div class="k">物理内存占用</div>
+      <div class="v" id="st-physPct">--</div>
+      <div class="s" id="st-physSub">可用 -- / 共 --</div>
+      <div class="bar"><i id="barPhys"></i></div>
+    </div>
+    <div class="stat c3" id="cardAvail">
+      <div class="k">提交空间剩余（AvailPageFile）</div>
+      <div class="v" id="st-avail">--</div>
+      <div class="s" id="st-availSub">内存负载 <span id="st-load">--</span> · <span id="st-trend">--</span></div>
+      <div class="bar"><i id="barAvail"></i></div>
+    </div>
+    <div class="stat c4">
+      <div class="k">系统运行时长</div>
+      <div class="v" id="st-uptime">--</div>
+      <div class="s" id="st-boot">采集于 --</div>
+      <div class="bar" style="height:5px;background:rgba(255,255,255,0.08)"></div>
+    </div>
+  </div>
+
+  <!-- 仪表条 -->
+  <div class="panel">
+    <h3>实时仪表 <span class="sub">提交空间见底 = Windows 上任何分配（哪怕 1MB）都可能失败，导致进程崩溃</span></h3>
+    <div class="gauge"><span class="g-name">提交空间占用</span>
+      <div class="track"><i id="gCommit"></i></div><span class="g-val" id="gCommitVal">--</span></div>
+    <div class="gauge"><span class="g-name">物理内存占用</span>
+      <div class="track"><i id="gPhys"></i></div><span class="g-val" id="gPhysVal">--</span></div>
+    <div class="gauge"><span class="g-name">内存负载（dwMemoryLoad）</span>
+      <div class="track"><i id="gLoad"></i></div><span class="g-val" id="gLoadVal">--</span></div>
+  </div>
+
+  <!-- 趋势 + 明细 -->
+  <div class="grid2">
+    <div class="panel">
+      <div class="chart-head">
+        <h3 style="margin:0">可用空间趋势 <span class="sub">最近约 8 分钟 · 每条竖线 = 越界一次采样</span></h3>
+        <div class="legend">
+          <span><i style="background:#38d39f"></i>提交剩余</span>
+          <span><i style="background:#9b6bff"></i>物理剩余</span>
+        </div>
+      </div>
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="panel">
+      <h3>当前指标明细 <span class="sub">单位：GB（GlobalMemoryStatusEx，与 JVM hs_err 日志同源）</span></h3>
+      <dl class="kv" id="kv"></dl>
+    </div>
+  </div>
+
+  <!-- 内存大户 -->
+  <div class="panel tablecard">
+    <h3>内存大户 Top 20 <span class="sub">按「提交大小」排序 —— 谁在吃 commit，一目了然（vmmem = WSL2/Docker）</span></h3>
+    <table>
+      <thead>
+        <tr><th style="width:38px">#</th><th>进程</th><th style="text-align:right">提交大小</th>
+            <th style="text-align:right">峰值提交</th><th style="text-align:right">工作集</th>
+            <th style="text-align:right">占系统 commit</th></tr>
+      </thead>
+      <tbody id="topBody"></tbody>
+    </table>
+    <div class="empty" id="topEmpty" style="display:none">正在采集进程数据…</div>
+  </div>
+
+  <footer>
+    崩溃场景：Java 的 hs_err 日志中 “TotalPageFile size 40644M (AvailPageFile size 63M)” —— 页面文件只剩 63MB，
+    系统 commit 顶到上限，任何进程（哪怕 JIT 线程申请 1MB）都会分配失败。<br/>
+    缓解：重启电脑 · 系统属性 → 高级 → 性能设置 → 高级 → 虚拟内存改为“系统管理的大小” · 任务管理器按“提交大小”排序，重点排查 vmmem / Docker。<br/>
+    SysMonitor · 数据仅在本机 127.0.0.1 页面展示，不上传任何内容。
+  </footer>
+</div>
+
+<!-- 报警弹窗 -->
+<div class="modal-mask" id="alertModal">
+  <div class="modal">
+    <h3 id="alertTitle">⚠ 内存告警</h3>
+    <div id="alertBody"></div>
+    <div class="actions">
+      <button class="btn danger" id="alertOk">我知道了</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"><div class="box"><span class="dot"></span><span id="toast-msg"></span></div></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const GB = 1024 ** 3;
+const MB = 1024 ** 2;
+const SETTINGS_KEY = "sysmon_settings_v1";
+const ORIG_TITLE = document.title;
+const MAX_POINTS = 240;   // 8 分钟 @ 2s
+const TOP_N = 20;
+
+const defaults = {
+  refreshSec: 2,
+  warnAvailGb: 2,      // commit 剩余 < 2GB -> 警告
+  critAvailGb: 0.5,    // commit 剩余 < 0.5GB -> 严重（崩溃现场仅 63MB）
+  warnCommitPct: 85,
+  critCommitPct: 95,
+  warnPhysGb: 4,
+  critPhysGb: 1,
+  predict: true,
+  predictWarnMin: 60,
+  predictCritMin: 15,
+  sound: true,
+  notif: true,
+  popup: true,
+  snoozeMin: 5,
+};
+
+let S = loadSettings();
+let history = [];        // {t, ca, pa} 字节
+let metrics = null;      // 最新一份完整指标
+let level = "ok";        // ok | warn | crit | off
+let activeCrit = false;  // 已告警且尚未恢复/静默
+let snoozeUntil = 0;
+let failCount = 0;
+let lastTick = 0;
+let timer = null;
+let titleFlash = null;
+let audioCtx = null;
+let topSig = "";
+let prevLevel = "off";
+let audioUnlocked = false;
+
+// ---------------- 设置 ----------------
+function loadSettings() {
+  const out = { ...defaults };
+  try {
+    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    for (const k in raw) if (k in defaults) out[k] = raw[k];
+  } catch (e) { /* 忽略损坏的本地设置 */ }
+  return out;
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(S)); } catch (e) {}
+}
+function syncSettingsUI() {
+  document.querySelectorAll("[data-key]").forEach((el) => {
+    const k = el.dataset.key;
+    if (el.type === "checkbox") el.checked = !!S[k];
+    else el.value = S[k];
+  });
+}
+document.querySelectorAll("[data-key]").forEach((el) => {
+  el.addEventListener("change", () => {
+    const k = el.dataset.key;
+    if (el.type === "checkbox") S[k] = el.checked;
+    else { const v = parseFloat(el.value); if (!isNaN(v)) S[k] = v; }
+    saveSettings();
+    restartTimer();
+    toast("设置已保存", "ok");
+  });
+});
+$("resetBtn").onclick = () => { S = { ...defaults }; saveSettings(); syncSettingsUI(); restartTimer(); toast("已恢复默认阈值", "ok"); };
+
+// ---------------- 工具函数 ----------------
+function fmtB(n) {
+  if (n == null || isNaN(n)) return "--";
+  if (n >= GB) return (n / GB).toFixed(2) + " GB";
+  if (n >= MB) return Math.round(n / MB) + " MB";
+  return Math.round(n) + " B";
+}
+function fmtSmart(n) { // 更醒目：<1GB 用 MB
+  if (n == null || isNaN(n)) return "--";
+  if (n >= GB) return (n / GB).toFixed(2) + " GB";
+  return Math.round(n / MB) + " MB";
+}
+function fmtDur(sec) {
+  if (sec == null) return "--";
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return d + " 天 " + h + " 时";
+  if (h > 0) return h + " 时 " + m + " 分";
+  return m + " 分";
+}
+function fmtClock(ms) {
+  const d = new Date(ms);
+  const p = (x) => String(x).padStart(2, "0");
+  return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+let toastTimer = null;
+function toast(msg, type) {
+  const t = $("toast");
+  t.className = type || "";
+  $("toast-msg").textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
+}
+
+// ---------------- 声音 / 通知 ----------------
+function ensureAudio() {
+  if (!S.sound || !audioUnlocked) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) {}
+}
+function alarmSound() {
+  ensureAudio();
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  for (let i = 0; i < 3; i++) {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(880 + i * 60, t0 + i * 0.4);
+    g.gain.setValueAtTime(0.0001, t0 + i * 0.4);
+    g.gain.exponentialRampToValueAtTime(0.3, t0 + i * 0.4 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.4 + 0.34);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t0 + i * 0.4); o.stop(t0 + i * 0.4 + 0.35);
+  }
+}
+function systemNotify(title, body) {
+  if (!S.notif || !("Notification" in window)) return;
+  try {
+    if (Notification.permission === "granted") new Notification(title, { body, tag: "sysmon" });
+    else if (Notification.permission !== "denied") {
+      // 尚未授权时主动请求一次
+      Notification.requestPermission().then((p) => {
+        if (p === "granted") new Notification(title, { body, tag: "sysmon" });
+      }).catch(() => {});
+    }
+  } catch (e) {}
+}
+$("notifBtn").onclick = () => {
+  if (!("Notification" in window)) { toast("当前浏览器不支持系统通知", "err"); return; }
+  Notification.requestPermission().then((p) =>
+    toast(p === "granted" ? "系统通知已启用" : "通知权限被拒绝，仅保留页面内弹窗", p === "granted" ? "ok" : "err"));
+};
+function startTitleFlash() {
+  if (titleFlash) return;
+  let on = false;
+  titleFlash = setInterval(() => {
+    on = !on;
+    document.title = on ? "⚠ 内存告警 · SysMonitor" : ORIG_TITLE;
+  }, 900);
+}
+function stopTitleFlash() {
+  if (titleFlash) { clearInterval(titleFlash); titleFlash = null; }
+  document.title = ORIG_TITLE;
+}
+
+// 解锁音频：任意用户交互后
+["pointerdown", "keydown"].forEach((ev) =>
+  window.addEventListener(ev, () => { audioUnlocked = true; ensureAudio(); }, { once: false }));
+
+// ---------------- 报警 ----------------
+function evaluate(m) {
+  const reasons = { warn: [], crit: [] };
+  const c = m.commit, p = m.physical;
+  const hasCommit = c.total > 0;
+  const availGb = c.avail / GB, physGb = p.avail / GB;
+
+  if (hasCommit) {
+    if (c.usedPct >= S.critCommitPct) reasons.crit.push("提交空间占用已达 " + c.usedPct + "%（>=" + S.critCommitPct + "%），已接近上限");
+    else if (c.usedPct >= S.warnCommitPct) reasons.warn.push("提交空间占用 " + c.usedPct + "%（>=" + S.warnCommitPct + "%）");
+    if (availGb <= S.critAvailGb) reasons.crit.push("提交空间剩余仅 " + fmtSmart(c.avail) + "（<" + S.critAvailGb + "GB），Windows 上任何进程申请内存都可能失败");
+    else if (availGb <= S.warnAvailGb) reasons.warn.push("提交空间剩余 " + fmtSmart(c.avail) + "（<" + S.warnAvailGb + "GB）");
+  }
+  if (physGb <= S.critPhysGb) reasons.crit.push("物理内存剩余仅 " + fmtSmart(p.avail) + "（<" + S.critPhysGb + "GB）");
+  else if (physGb <= S.warnPhysGb) reasons.warn.push("物理内存剩余 " + fmtSmart(p.avail) + "（<" + S.warnPhysGb + "GB）");
+
+  const pred = predict();
+  if (S.predict && pred) {
+    if (pred.minLeft <= S.predictCritMin) reasons.crit.push("按近 8 分钟下降趋势，提交空间约 " + pred.minLeft + " 分钟后耗尽");
+    else if (pred.minLeft <= S.predictWarnMin) reasons.warn.push("按趋势推算约 " + pred.minLeft + " 分钟后提交空间将耗尽");
+  }
+  return {
+    level: reasons.crit.length ? "crit" : (reasons.warn.length ? "warn" : "ok"),
+    warn: reasons.warn, crit: reasons.crit, pred,
+  };
+}
+function predict() {
+  if (history.length < 10) return null;
+  const pts = history.slice(-20).filter((x) => x.ca > 0);
+  if (pts.length < 10) return null;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  const t0 = pts[0].t;
+  for (const pt of pts) {
+    const x = (pt.t - t0) / 1000, y = pt.ca / GB;
+    sx += x; sy += y; sxx += x * x; sxy += x * y;
+  }
+  const k = pts.length, denom = k * sxx - sx * sx;
+  if (Math.abs(denom) < 1e-9) return null;
+  const a = (k * sxy - sx * sy) / denom; // GB/秒
+  if (a >= -0.0001) return null;          // 未在下降
+  const lastY = pts[pts.length - 1].ca / GB;
+  const minLeft = lastY / (-a) / 60;
+  if (!isFinite(minLeft)) return null;
+  return { minLeft: Math.max(0, Math.round(minLeft)), gbPerMin: -a * 60 };
+}
+
+function fireAlarm(ev) {
+  // 弹窗内容
+  const c = metrics && metrics.commit, p = metrics && metrics.physical;
+  const big = (metrics && metrics.top || []).filter((x) => c && c.total > 0 && x.commit / c.total >= 0.05).slice(0, 3);
+  const reasons = ev.crit && ev.crit.length ? ev.crit : (ev.warn || []);
+  const body = $("alertBody");
+  let html = "<p>系统即将/已经到达内存上限，继续放任可能复现「native 内存分配失败 → 应用崩溃」。</p>";
+  html += "<ul>" + reasons.map((r) => "<li>" + esc(r) + "</li>").join("") + "</ul>";
+  if (big.length) {
+    html += "<p>当前较大的内存占用进程：</p><ul>";
+    big.forEach((x) => html += "<li>" + esc(x.name || "未知进程") + " (PID " + x.pid + ") 提交 " + fmtB(x.commit) + "</li>");
+    html += "</ul>";
+  }
+  html += '<div class="tip">建议：立即保存工作 → 任务管理器按“提交大小”排序找元凶（vmmem/Docker/浏览器）→ 必要时重启电脑，并把虚拟内存改为“系统管理的大小”。</div>';
+  body.innerHTML = html;
+
+  if (ev.level === "crit") {
+    $("alertTitle").textContent = "⚠ 严重告警：提交空间（页面文件）即将耗尽";
+  } else {
+    $("alertTitle").textContent = "⚠ 内存预警";
+    $("alertTitle").style.color = "var(--warn)";
+  }
+  if (S.popup) {
+    $("alertModal").classList.add("show");
+  }
+  activeCrit = true;
+  systemNotify("SysMonitor " + (ev.level === "crit" ? "严重告警" : "预警"),
+    (reasons[0] || "内存指标异常") + (big.length ? " · 最大占用：" + big[0].name : ""));
+  if (S.sound) alarmSound();
+  startTitleFlash();
+}
+$("alertOk").onclick = () => {
+  $("alertModal").classList.remove("show");
+  snoozeUntil = Date.now() + S.snoozeMin * 60000;
+  activeCrit = false;
+  stopTitleFlash();
+  toast(S.snoozeMin > 0 ? "已静默 " + S.snoozeMin + " 分钟，超时后若仍异常会再次提醒" : "已关闭，异常持续将再次提醒", "ok");
+};
+$("alertModal").addEventListener("click", (e) => { if (e.target.id === "alertModal") $("alertOk").click(); });
+
+$("testBtn").onclick = () => {
+  if (!metrics) { toast("暂无数据，请稍候再测试", "err"); return; }
+  fireAlarm({
+    level: "crit",
+    crit: ["（测试）模拟严重告警：提交空间剩余 " + fmtSmart(metrics.commit.avail) + "，触发阈值报警链路"],
+    warn: [],
+  });
+};
+
+// ---------------- 渲染 ----------------
+function setStatus(lv, title, desc, hint) {
+  const badge = $("statusBadge"), banner = $("banner");
+  badge.className = "badge " + (lv === "crit" ? "st-crit" : lv === "warn" ? "st-warn" : "st-" + lv);
+  banner.className = "st-" + lv;
+  const txt = { ok: "状态正常", warn: "内存吃紧", crit: "内存告警", off: "连接中断" };
+  $("badgeTxt").textContent = txt[lv] || txt.ok;
+  $("bannerTitle").textContent = title;
+  $("bannerDesc").textContent = desc || "";
+  $("bannerHint").textContent = hint || "";
+  level = lv;
+}
+const TIP_OK = "请继续保持观察。若提交空间剩余持续低于 2GB，可在“报警设置”中调低阈值提前预警。";
+const TIP_WARN = "建议查看下方内存大户，清理可释放的进程；若趋势继续下降请尽快保存工作。";
+const TIP_CRIT = "此状态接近或已达“分配 1MB 都可能失败”的崩溃点（与 GitAskPassApp/JVM 崩溃日志一致）。建议立即保存并重启电脑，或先终止占内存的大户（vmmem / Docker / 浏览器）。";
+
+function renderAll() {
+  if (!metrics) return;
+  const c = metrics.commit, p = metrics.physical;
+  const hasCommit = c.total > 0;
+
+  // 卡片
+  const commitHot = hasCommit && c.usedPct >= S.critCommitPct;
+  $("cardCommit").classList.toggle("hot", commitHot);
+  $("st-commitPct").textContent = hasCommit ? c.usedPct + "%" : "--";
+  $("st-commitSub").textContent = hasCommit
+    ? "已提交 " + fmtSmart(c.used) + " / 上限 " + fmtSmart(c.total) : "未检测到页面文件配置";
+  $("barCommit").style.width = (hasCommit ? Math.min(100, c.usedPct) : 0) + "%";
+  $("barCommit").style.background = commitHot ? "var(--danger)" : "";
+
+  $("st-physPct").textContent = p.usedPct + "%";
+  $("st-physSub").textContent = "可用 " + fmtSmart(p.avail) + " / 共 " + fmtB(p.total);
+  $("barPhys").style.width = Math.min(100, p.usedPct) + "%";
+
+  $("st-avail").textContent = hasCommit ? fmtSmart(c.avail) : "--";
+  $("cardAvail").classList.toggle("hot", hasCommit && c.avail <= S.critAvailGb * GB);
+  const pr = predict();
+  $("st-trend").textContent = pr
+    ? (pr.gbPerMin >= 0.01 ? "下降 " + pr.gbPerMin.toFixed(2) + " GB/分" : "缓慢下降")
+    : (history.length < 10 ? "采集中…" : "走势平稳");
+  const availPct = hasCommit ? Math.max(0, 100 - c.usedPct) : 0;
+  $("barAvail").style.width = availPct + "%";
+  $("barAvail").style.background = availPct <= S.critAvailGb / (c.total / GB) * 100 ? "var(--danger)" : "";
+  $("st-load").textContent = metrics.memoryLoad + "%";
+  $("st-uptime").textContent = fmtDur(metrics.uptimeSec);
+  const bd = new Date(metrics.ts);
+  $("st-boot").textContent = "更新于 " + fmtClock(bd.getTime());
+
+  // 仪表
+  $("gCommit").style.width = (hasCommit ? Math.min(100, c.usedPct) : 0) + "%";
+  $("gCommitVal").textContent = (hasCommit ? c.usedPct + "%" : "--");
+  $("gPhys").style.width = Math.min(100, p.usedPct) + "%";
+  $("gPhysVal").textContent = p.usedPct + "%";
+  $("gLoad").style.width = Math.min(100, metrics.memoryLoad) + "%";
+  $("gLoadVal").textContent = metrics.memoryLoad + "%";
+  const gColor = (v, warnT, critT) => v >= critT ? "var(--danger)" : v >= warnT ? "var(--warn)" : "var(--accent)";
+  $("gCommit").style.background = gColor(hasCommit ? c.usedPct : 0, S.warnCommitPct, S.critCommitPct);
+  // 物理内存：按“剩余 < 警告/严重阈值”反算为占用率作为色标
+  const physWarnPct = p.total > 0 ? 100 - S.warnPhysGb * GB / p.total * 100 : 85;
+  const physCritPct = p.total > 0 ? 100 - S.critPhysGb * GB / p.total * 100 : 95;
+  $("gPhys").style.background = gColor(p.usedPct, physWarnPct, physCritPct);
+
+  // 明细
+  renderKV();
+
+  // 进程表
+  renderTop();
+}
+
+function renderKV() {
+  const m = metrics, c = m.commit, p = m.physical, v = m.virtual;
+  const os = m.os || {};
+  const rows = [
+    ["物理内存 总量", fmtB(p.total)],
+    ["物理内存 已用", fmtB(p.used) + "（" + p.usedPct + "%）"],
+    ["物理内存 可用", fmtB(p.avail), p.avail < S.warnPhysGb * GB],
+    ["", ""], // sep
+    ["提交空间上限 Commit limit", fmtB(c.total)],
+    ["已提交 commit charge", fmtB(c.used)],
+    ["剩余可提交 AvailPageFile", fmtB(c.avail), c.total > 0 && c.avail <= S.critAvailGb * GB],
+    ["提交占用率", c.total > 0 ? c.usedPct + "%" : "--"],
+    ["", ""],
+    ["内存负载 Memory Load", m.memoryLoad + "%"],
+    ["虚拟内存(进程地址)可用", fmtB(v.avail)],
+    ["系统运行时长", fmtDur(m.uptimeSec)],
+    ["采集时刻", fmtClock(m.ts)],
+  ];
+  const osLine = [];
+  if (os.caption) osLine.push(esc(os.caption));
+  if (os.version) osLine.push(esc(os.version));
+  if (os.hypervisorPresent) osLine.push("Hyper-V/虚拟机监控已启用");
+  if (os.bootTime) osLine.push("启动于 " + esc(String(os.bootTime).replace("T", " ").slice(0, 19)));
+  if (osLine.length) { rows.push(["", ""], ["系统", osLine.join(" · ")]); }
+  let html = "";
+  for (const [k, val, warn] of rows) {
+    if (k === "" && val === "") { html += '<dd class="sep"></dd>'; continue; }
+    html += "<dt>" + esc(k) + "</dt><dd" + (warn ? ' class="big"' : "") + ">" + esc(val) + "</dd>";
+  }
+  $("kv").innerHTML = html;
+}
+
+function renderTop() {
+  const top = metrics.top;
+  const m = metrics;
+  if (!top || !top.length) {
+    $("topBody").innerHTML = "";
+    $("topEmpty").style.display = "block";
+    $("topEmpty").textContent = "暂无进程数据（PowerShell 被禁用或非 Windows）";
+    return;
+  }
+  const sig = JSON.stringify(top);
+  if (sig === topSig) return; // 进程表每 15s 才变化，避免高频重绘
+  topSig = sig;
+  $("topEmpty").style.display = "none";
+  const c = m.commit, total = (c && c.total) || 0;
+  let html = "";
+  top.slice(0, TOP_N).forEach((x, i) => {
+    const share = total > 0 ? (x.commit / total * 100) : 0;
+    const lv = share >= 8 ? 2 : share >= 4 ? 1 : 0;
+    const name = x.name || "未知进程";
+    html += `<tr class="hot-lv${lv}">
+      <td class="rank">${i + 1}</td>
+      <td><div class="pname"><span class="icon">${esc(name[0] || "?")}</span>
+        <span class="nm" title="${esc(name)}">${esc(name)}</span>
+        <span class="pid">PID ${x.pid}</span></div></td>
+      <td class="mb">${fmtB(x.commit)}</td>
+      <td class="mb">${fmtB(x.peak)}</td>
+      <td class="mb">${fmtB(x.ws)}</td>
+      <td class="mb">${total > 0 ? share.toFixed(1) + "%" : "--"}</td></tr>`;
+  });
+  $("topBody").innerHTML = html;
+}
+
+// ---------------- 趋势图 ----------------
+function drawChart() {
+  const cv = $("chart"), ctx = cv.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (history.length < 2) {
+    ctx.fillStyle = "#8b93a7"; ctx.font = "12px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("采集中，稍候绘制趋势曲线…", w / 2, h / 2);
+    return;
+  }
+  const padL = 48, padR = 16, padT = 8, padB = 22;
+  const iw = w - padL - padR, ih = h - padT - padB;
+  const series = [history.map((x) => ({ x: x.t, y: x.ca })), history.map((x) => ({ x: x.t, y: x.pa }))];
+  let maxY = 0;
+  series.forEach((s) => s.forEach((pt) => { if (pt.y > maxY) maxY = pt.y; }));
+  const yMaxGb = Math.max(1, Math.ceil(maxY / GB * 1.15 * 10) / 10);
+  const yMin = 0;
+  const t0 = history[0].t, t1 = history[history.length - 1].t;
+  const X = (t) => padL + (t - t0) / Math.max(1, t1 - t0) * iw;
+  const Y = (v) => padT + ih - (v / GB - yMin) / (yMaxGb - yMin) * ih;
+
+  // 网格与 Y 轴
+  ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.fillStyle = "#8b93a7";
+  ctx.font = "10px 'Cascadia Mono', Consolas, monospace"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const gb = yMaxGb * i / 4;
+    const y = Y(gb * GB);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+    ctx.fillText(gb.toFixed(1), padL - 6, y);
+  }
+  // X 轴时间标签
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillText(fmtClock(t0), padL, h - padB + 4);
+  ctx.fillText("现在 " + fmtClock(t1), w - padR, h - padB + 4);
+  // 严重阈值参考线
+  const critGb = S.critAvailGb;
+  if (critGb > 0 && critGb <= yMaxGb) {
+    ctx.strokeStyle = "rgba(255,93,108,0.55)"; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(padL, Y(critGb * GB)); ctx.lineTo(w - padR, Y(critGb * GB)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255,93,108,0.9)"; ctx.textAlign = "left";
+    ctx.fillText("严重线 " + critGb + "GB", padL + 6, Y(critGb * GB) - 8);
+    ctx.textAlign = "right";
+  }
+  // 曲线
+  const colors = ["#38d39f", "#9b6bff"];
+  series.forEach((s, si) => {
+    ctx.strokeStyle = colors[si]; ctx.lineWidth = 1.8; ctx.lineJoin = "round";
+    ctx.beginPath();
+    s.forEach((pt, i) => {
+      const x = X(pt.x), y = Y(pt.y);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+}
+
+function onResizeChart() { requestAnimationFrame(drawChart); }
+window.addEventListener("resize", onResizeChart);
+
+// ---------------- 主循环 ----------------
+async function tick() {
+  const now = Date.now();
+  try {
+    const res = await fetch("/api/stats", { cache: "no-store" });
+    const d = await res.json();
+    failCount = 0;
+    if (lastTick && now - lastTick > 45000) history = []; // 断流恢复，丢弃旧趋势
+    lastTick = now;
+    if (!d.ok) { setStatus("off", "数据源不可用", d.reason || "采集失败", "仅支持 Windows 环境。"); return; }
+    metrics = d;
+
+    // 追加历史点
+    history.push({ t: now, ca: d.commit.avail, pa: d.physical.avail });
+    if (history.length > MAX_POINTS) history.shift();
+
+    // 判定与渲染
+    const ev = evaluate(d);
+    renderAll();
+    drawChart();
+    applyLevel(ev);
+  } catch (e) {
+    failCount++;
+    if (failCount >= 2) {
+      setStatus("off", "与监控服务连接中断", "请确认 sysmon.py 仍在运行；服务恢复后本页会自动重连。", "");
+      stopTitleFlash();
+    }
+  }
+}
+
+function applyLevel(ev) {
+  const isCrit = ev.level === "crit";
+  const isWarn = ev.level === "warn";
+  const now = Date.now();
+  const reasonTop = ev.crit[0] || ev.warn[0] || "";
+
+  if (isCrit) {
+    setStatus("crit",
+      "严重：提交空间（页面文件）即将耗尽，可能复现进程崩溃",
+      reasonTop || "内存异常，请尽快处理",
+      TIP_CRIT);
+    if (!activeCrit && now >= snoozeUntil) {
+      activeCrit = true;
+      fireAlarm(ev);
+    } else if (now < snoozeUntil) {
+      startTitleFlash(); // 静默期仍保持醒目状态
+    }
+  } else if (isWarn) {
+    setStatus("warn", "内存吃紧，请留意提交空间剩余", reasonTop || "", TIP_WARN);
+    activeCrit = false;
+    stopTitleFlash();
+    if (ev.warn.length && prevLevel !== "warn") toast("预警：" + ev.warn[0], "warn");
+  } else {
+    setStatus("ok", "系统内存状态正常", buildOkDesc(), TIP_OK);
+    activeCrit = false;
+    stopTitleFlash();
+  }
+  prevLevel = level;
+}
+function buildOkDesc() {
+  const c = metrics.commit;
+  if (!c || c.total <= 0) return "提交空间数据不可用";
+  const avail = fmtSmart(c.avail);
+  return "提交空间剩余 " + avail + "，占用 " + c.usedPct + "%；物理内存剩余 " + fmtSmart(metrics.physical.avail) + "。";
+}
+
+function restartTimer() {
+  if (timer) clearInterval(timer);
+  timer = setInterval(tick, Math.max(1, S.refreshSec) * 1000);
+}
+
+// ---------------- 启动 ----------------
+syncSettingsUI();
+restartTimer();
+tick();
+</script>
+</body>
+</html>
