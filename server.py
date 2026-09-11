@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Port Inspector — 端口占用查看与进程终止工具（零依赖，仅用标准库）。
+"""Port Inspector — 端口占用查看 / 进程终止 / 系统内存监控（零依赖，仅用标准库）。
+
+页面顶部两个 Tab：
+  1) 端口占用  —— 查看本机端口占用并按 PID / 端口终止进程
+  2) 系统内存监控 —— 监控 Windows 物理内存与提交空间(页面文件 commit)，阈值触发弹窗报警
 
 运行:  python server.py [端口] [--no-browser]   默认 8765
 访问:  http://127.0.0.1:8765
 打包:  pyinstaller --onefile --add-data "index.html;." server.py
 """
 import csv
+import ctypes
 import io
 import json
 import os
@@ -15,9 +20,12 @@ import re
 import signal
 import subprocess
 import sys
+import threading
+import time
 import urllib.parse
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from ctypes import wintypes
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SELF_PID = os.getpid()
 # Windows 系统关键进程（System / PID 4 等），禁止终止，避免把系统搞崩
@@ -260,6 +268,350 @@ def kill_port(port):
     }
 
 
+# ===========================================================================
+# 系统内存监控 —— 物理内存 / 提交空间(页面文件 commit) / 内存大户进程
+# ===========================================================================
+# 背景：IntelliJ 系崩溃常见根因是「Windows 系统级 commit（页面文件）耗尽」，例如 JVM
+# hs_err 日志里：TotalPageFile size 40644M (AvailPageFile size 63M)。
+# 这里用与 hs_err 同源的 GlobalMemoryStatusEx 采集，指标可与崩溃日志逐项对齐。
+
+PROC_CACHE_TTL = 15.0  # 内存大户进程缓存秒数（PowerShell 慢，没必要高频跑）
+IS_WINDOWS = platform.system() == "Windows"
+
+
+class _MEMORYSTATUSEX(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", wintypes.DWORD),
+        ("dwMemoryLoad", wintypes.DWORD),
+        ("ullTotalPhys", ctypes.c_ulonglong),      # 物理内存总量
+        ("ullAvailPhys", ctypes.c_ulonglong),      # 物理内存可用
+        ("ullTotalPageFile", ctypes.c_ulonglong),  # 提交空间上限 commit limit
+        ("ullAvailPageFile", ctypes.c_ulonglong),  # 剩余可提交量（根因指标）
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
+
+
+def _pct(part, total):
+    if total <= 0:
+        return 0.0
+    return round(part * 100.0 / total, 1)
+
+
+def memory_snapshot():
+    """系统内存快照（字节）；非 Windows 或调用失败返回 None。"""
+    if not IS_WINDOWS:
+        return None
+    try:
+        status = _MEMORYSTATUSEX()
+        status.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+        fn = ctypes.windll.kernel32.GlobalMemoryStatusEx
+        if not fn(ctypes.byref(status)):
+            return None
+        total_phys = status.ullTotalPhys
+        avail_phys = status.ullAvailPhys
+        limit = status.ullTotalPageFile       # commit limit（崩溃日志 TotalPageFile）
+        avail = status.ullAvailPageFile       # 剩余 commit（崩溃日志 AvailPageFile）
+        return {
+            "memoryLoad": int(status.dwMemoryLoad),
+            "physical": {
+                "total": total_phys, "avail": avail_phys,
+                "used": total_phys - avail_phys,
+                "usedPct": _pct(total_phys - avail_phys, total_phys),
+            },
+            "commit": {
+                "total": limit, "avail": avail,
+                "used": limit - avail,
+                "usedPct": _pct(limit - avail, limit),
+            },
+            "virtual": {
+                "total": status.ullTotalVirtual, "avail": status.ullAvailVirtual,
+                "used": status.ullTotalVirtual - status.ullAvailVirtual,
+                "usedPct": _pct(status.ullTotalVirtual - status.ullAvailVirtual,
+                                 status.ullTotalVirtual),
+            },
+        }
+    except Exception:
+        return None
+
+
+def uptime_seconds():
+    """系统运行时长（GetTickCount64），失败返回 None。"""
+    if not IS_WINDOWS:
+        return None
+    try:
+        fn = ctypes.windll.kernel32.GetTickCount64
+        fn.restype = ctypes.c_ulonglong
+        return int(fn() // 1000)
+    except Exception:
+        return None
+
+
+# 内存大户进程 —— 按「提交大小(PageFileUsage)」排序（任务管理器里的“提交大小”）
+_PS_PROBE = (
+    "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+    "$ErrorActionPreference='SilentlyContinue';"
+    "$procs=@(Get-CimInstance Win32_Process | "
+    "Select-Object ProcessId,Name,WorkingSetSize,PageFileUsage,PeakPageFileUsage | "
+    "Sort-Object PageFileUsage -Descending | Select-Object -First 20);"
+    "$cs=Get-CimInstance Win32_ComputerSystem;"
+    "$os=Get-CimInstance Win32_OperatingSystem;"
+    "$boot='';try{$boot=$os.LastBootUpTime.ToString('o')}catch{};"
+    "@{procs=@($procs);hypervisorPresent=[bool]$cs.HypervisorPresent;"
+    "osCaption=[string]$os.Caption;osVersion=[string]$os.Version;bootTime=$boot}"
+    "|ConvertTo-Json -Compress -Depth 3"
+)
+
+
+def _kb_to_bytes(v):
+    """PageFileUsage / PeakPageFileUsage 单位是 KB。"""
+    try:
+        return int(v) * 1024 if v is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_is_bytes(v):
+    """WorkingSetSize 单位本身就是字节。"""
+    try:
+        return int(v) if v is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _run_ps_json(script, timeout=20):
+    """执行 PowerShell 脚本并把 stdout 解析为 JSON；失败返回 None。"""
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout,
+        )
+    except Exception:
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    try:
+        return json.loads(out.stdout)
+    except Exception:
+        return None
+
+
+def _run_proc_probe():
+    data = _run_ps_json(_PS_PROBE, timeout=20)
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("procs") or []
+    if isinstance(raw, dict):  # 单进程时 PowerShell 可能解包成对象
+        raw = [raw]
+    top = []
+    for p in raw:
+        try:
+            pid = int(p.get("ProcessId"))
+        except (TypeError, ValueError):
+            continue
+        top.append({
+            "pid": pid,
+            "name": str(p.get("Name") or "")[:60],
+            "commit": _kb_to_bytes(p.get("PageFileUsage")),    # 私有提交大小 (KB)
+            "ws": _as_is_bytes(p.get("WorkingSetSize")),       # 工作集/物理内存 (字节)
+            "peak": _kb_to_bytes(p.get("PeakPageFileUsage")),  # 峰值提交 (KB)
+        })
+    top.sort(key=lambda x: -x["commit"])
+    return {
+        "top": top[:20],
+        "os": {
+            "caption": str(data.get("osCaption") or ""),
+            "version": str(data.get("osVersion") or ""),
+            "hypervisorPresent": bool(data.get("hypervisorPresent")),
+            "bootTime": str(data.get("bootTime") or ""),
+        },
+    }
+
+
+_proc_lock = threading.Lock()
+_proc_cache = {"data": None, "ts": 0.0}
+
+
+def proc_snapshot():
+    """带缓存的进程快照；PowerShell 较慢，成功结果缓存 PROC_CACHE_TTL 秒。"""
+    now = time.monotonic()
+    with _proc_lock:
+        if _proc_cache["data"] is not None and now - _proc_cache["ts"] < PROC_CACHE_TTL:
+            return _proc_cache["data"]
+    data = _run_proc_probe()
+    if data is not None:
+        with _proc_lock:
+            _proc_cache["data"] = data
+            _proc_cache["ts"] = time.monotonic()
+    return data
+
+
+def build_stats():
+    mem = memory_snapshot()
+    if mem is None:
+        return {
+            "ok": False,
+            "reason": "仅支持 Windows（GlobalMemoryStatusEx 不可用）",
+            "platform": platform.system(),
+            "ts": int(time.time() * 1000),
+        }
+    stats = {
+        "ok": True,
+        "ts": int(time.time() * 1000),
+        "uptimeSec": uptime_seconds(),
+    }
+    stats.update(mem)
+    ps = proc_snapshot()
+    stats["top"] = ps["top"] if ps else None
+    stats["os"] = ps["os"] if ps else None
+    return stats
+
+
+# ===========================================================================
+# 系统服务 —— 列表 / 启动 / 停止 / 设置启动类型
+# ===========================================================================
+
+SERVICES_CACHE_TTL = 20.0   # 服务列表缓存秒数（PowerShell 较慢，低频刷新即可）
+# 受保护服务：停止/禁用会直接导致系统崩溃，或让本工具依赖的 WMI 失效
+PROTECTED_SERVICES = {
+    "rpcss", "dcomlaunch", "lsass", "lsaiso", "winlogon", "smss", "csrss",
+    "services", "wininit", "winmgmt", "lsm", "samss", "plugplay", "nsi",
+}
+VALID_START_MODES = {"Automatic", "AutomaticDelayedStart", "Manual", "Disabled"}
+
+_PS_SERVICES = (
+    "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+    "$ErrorActionPreference='SilentlyContinue';"
+    "$list=@(Get-CimInstance Win32_Service | "
+    "Select-Object Name,DisplayName,State,StartMode,ProcessId | "
+    "Sort-Object @{Expression='State';Descending=$true},DisplayName);"
+    "@{services=@($list)}|ConvertTo-Json -Compress -Depth 3"
+)
+
+
+def _ps_service_action(name, action, mode=""):
+    """生成服务操作脚本：start / stop / restart / mode(改启动类型)。"""
+    safe = name.replace("'", "''")   # PowerShell 单引号字符串内转义
+    return (
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        "$ErrorActionPreference='Stop';"
+        "$name='{n}';"
+        "try{{"
+        "  if('{a}' -eq 'start'){{Start-Service -Name $name -ErrorAction Stop}}"
+        "  elseif('{a}' -eq 'stop'){{Stop-Service -Name $name -Force -ErrorAction Stop}}"
+        "  elseif('{a}' -eq 'restart'){{Restart-Service -Name $name -Force -ErrorAction Stop}}"
+        "  elseif('{a}' -eq 'mode'){{Set-Service -Name $name -StartupType '{m}' -ErrorAction Stop}};"
+        "  $s=Get-CimInstance Win32_Service -Filter \"Name='$name'\";"
+        "  @{{success=$true;state=[string]$s.State;mode=[string]$s.StartMode;"
+        "pid=[int]$s.ProcessId}}|ConvertTo-Json -Compress"
+        "}}catch{{"
+        "  @{{success=$false;error=$_.Exception.Message}}|ConvertTo-Json -Compress"
+        "}}"
+    ).format(n=safe, a=action, m=mode)
+
+
+def is_admin():
+    """是否以管理员身份运行（启停服务通常需要管理员）。"""
+    if not IS_WINDOWS:
+        return False
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _run_services_probe():
+    data = _run_ps_json(_PS_SERVICES, timeout=30)
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("services") or []
+    if isinstance(raw, dict):   # 单条时 PowerShell 可能解包成对象
+        raw = [raw]
+    out = []
+    for s in raw:
+        name = str(s.get("Name") or "")
+        if not name:
+            continue
+        try:
+            pid = int(s.get("ProcessId") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        out.append({
+            "name": name,
+            "display": str(s.get("DisplayName") or name),
+            "state": str(s.get("State") or ""),
+            "mode": str(s.get("StartMode") or ""),
+            "pid": pid,
+            "protected": name.lower() in PROTECTED_SERVICES,
+        })
+    if not out:
+        return None
+    return {"services": out, "admin": is_admin()}
+
+
+_svc_lock = threading.Lock()
+_svc_cache = {"data": None, "ts": 0.0}
+
+
+def services_snapshot(force=False):
+    """带缓存的服务快照；force=True 用于操作后立刻刷新。"""
+    now = time.monotonic()
+    with _svc_lock:
+        if (not force and _svc_cache["data"] is not None
+                and now - _svc_cache["ts"] < SERVICES_CACHE_TTL):
+            return _svc_cache["data"]
+    data = _run_services_probe()
+    if data is not None:
+        with _svc_lock:
+            _svc_cache["data"] = data
+            _svc_cache["ts"] = time.monotonic()
+    return data
+
+
+def service_action(name, action, mode=""):
+    """启动 / 停止 / 重启服务，或修改启动类型。"""
+    if not IS_WINDOWS:
+        return {"success": False, "error": "仅支持 Windows", "name": name}
+    name = (name or "").strip()
+    # 拒绝含 PowerShell 注入字符的服务名
+    if not name or re.search(r"['\";|&`$<>\r\n]", name):
+        return {"success": False, "error": "无效的服务名", "name": name}
+    if name.lower() in PROTECTED_SERVICES:
+        return {"success": False, "error": "受保护的系统服务，禁止操作（停止可能导致系统崩溃或本工具失效）", "name": name}
+    if action not in ("start", "stop", "restart", "mode"):
+        return {"success": False, "error": "不支持的操作", "name": name}
+    if action == "mode" and mode not in VALID_START_MODES:
+        return {"success": False, "error": "无效的启动类型：" + str(mode), "name": name}
+
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             _ps_service_action(name, action, mode)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=45,
+        )
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "操作超时（服务无响应或正被其它进程占用）", "name": name}
+    except Exception as e:
+        return {"success": False, "error": f"执行失败：{e}", "name": name}
+
+    data = None
+    if res.stdout.strip():
+        try:
+            data = json.loads(res.stdout)
+        except Exception:
+            data = None
+    if not isinstance(data, dict):
+        msg = (res.stderr or res.stdout or "未知错误").strip()
+        return {"success": False, "error": msg[:500] or "未知错误", "name": name}
+    data["name"] = name
+    if data.get("success"):
+        services_snapshot(force=True)   # 操作完成后立刻刷新缓存
+    return data
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, payload, content_type="application/json; charset=utf-8"):
         data = payload if isinstance(payload, bytes) else payload.encode("utf-8")
@@ -285,17 +637,35 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/ports":
             conns = get_connections()
             self._json(200, {"ports": conns, "count": len(conns)})
+        elif path == "/api/stats":
+            self._json(200, build_stats())
+        elif path == "/api/services":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            force = qs.get("force", [""])[0] == "1"
+            snap = services_snapshot(force=force)
+            if snap is None:
+                self._json(200, {
+                    "ok": False, "services": [], "admin": is_admin(),
+                    "error": "无法获取服务列表（PowerShell 被禁用或非 Windows）",
+                })
+            else:
+                self._json(200, dict(ok=True, **snap))
         else:
             self._json(404, {"error": "not found"})
+
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
         if path in ("/api/kill", "/api/kill_port"):
-            length = int(self.headers.get("Content-Length", 0) or 0)
-            raw = self.rfile.read(length) if length else b"{}"
-            try:
-                data = json.loads(raw)
-            except Exception:
+            data = self._read_json_body()
+            if data is None:
                 self._json(400, {"success": False, "error": "无效的请求体"})
                 return
             try:
@@ -303,6 +673,17 @@ class Handler(BaseHTTPRequestHandler):
                     result = kill_pid(data.get("pid"))
                 else:
                     result = kill_port(data.get("port"))
+            except Exception as e:
+                result = {"success": False, "error": f"服务器异常：{e}"}
+            self._json(200, result)
+        elif path == "/api/service":
+            data = self._read_json_body()
+            if data is None:
+                self._json(400, {"success": False, "error": "无效的请求体"})
+                return
+            try:
+                result = service_action(data.get("name"), data.get("action"),
+                                        data.get("mode") or "")
             except Exception as e:
                 result = {"success": False, "error": f"服务器异常：{e}"}
             self._json(200, result)
@@ -321,9 +702,11 @@ def main():
             no_browser = True
         elif a.isdigit():
             port = int(a)
-    server = HTTPServer(("127.0.0.1", port), Handler)
+    # 多线程：进程快照（PowerShell）较慢时不会阻塞端口查询等其它请求
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}"
-    print(f"端口占用管理器已启动： {url}")
+    print(f"PortInspector 已启动： {url}")
+    print("功能：端口占用查看 / 系统内存监控（页面顶部 Tab 切换）")
     print("按 Ctrl+C 停止")
     if not no_browser:
         try:
