@@ -334,6 +334,32 @@
   }
   .svcsel:disabled { opacity: 0.32; cursor: not-allowed; }
 
+  /* ===== 磁盘清理 ===== */
+  .diskgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 13px; margin-bottom: 16px; }
+  .disk {
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 15px; padding: 14px 16px;
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
+  }
+  .disk .dh { display: flex; align-items: center; gap: 10px; }
+  .disk .dl {
+    width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid; place-items: center;
+    font-weight: 700; font-size: 15px; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2));
+  }
+  .disk .dt { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .disk .ds { font-size: 11px; color: var(--muted); }
+  .disk .dp { margin-left: auto; font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .disk .dbar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 5px; margin: 11px 0 8px; overflow: hidden; }
+  .disk .dbar i { display: block; height: 100%; border-radius: 5px; transition: width 0.4s, background 0.3s; }
+  .disk .dn { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .chk { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+  .fpath { max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; font-size: 12.5px; }
+  .inp {
+    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); border-radius: 11px;
+    padding: 9px 12px; color: var(--text); font-size: 13px; outline: none;
+  }
+  .inp:focus { border-color: var(--accent); }
+  .inlinebar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
   @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
   @media (max-width: 720px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
@@ -376,6 +402,12 @@
           <rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>
         </svg>
         系统服务
+      </button>
+      <button class="tab" data-view="disks">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>
+        </svg>
+        磁盘清理
       </button>
     </div>
 
@@ -605,6 +637,57 @@
         受保护的系统关键服务（RPC、LSASS、Winlogon、WMI 等）已禁止操作 —— 停止它们会直接导致系统崩溃或本工具失效。停止服务可能影响依赖它的其它服务。
       </p>
     </section>
+
+    <section id="view-disks" hidden>
+      <div class="sysbar">
+        <span class="badge" id="diskBadge"><span class="dot"></span><span id="diskBadgeTxt">加载中…</span></span>
+        <span class="hint">容量数据来自 GetDiskFreeSpaceExW，与资源管理器显示一致</span>
+      </div>
+
+      <div class="diskgrid" id="diskGrid"></div>
+
+      <div class="panel tablecard">
+        <h3>垃圾清理 <span class="sub">仅扫描缓存 / 临时目录，删除为永久删除</span></h3>
+        <div class="inlinebar" style="margin-bottom:12px">
+          <button class="btn primary" id="cleanScanBtn">扫描可清理项</button>
+          <button class="btn danger" id="cleanRunBtn" disabled>清理选中</button>
+          <span class="hint" id="cleanSummary">尚未扫描</span>
+        </div>
+        <table>
+          <thead>
+            <tr><th style="width:38px"></th><th style="width:170px">类别</th><th>路径</th>
+                <th style="text-align:right;width:110px">大小</th><th style="text-align:right;width:90px">文件数</th></tr>
+          </thead>
+          <tbody id="cleanBody"></tbody>
+        </table>
+        <div class="empty" id="cleanEmpty">点击「扫描可清理项」开始（约需十几秒）</div>
+      </div>
+
+      <div class="panel tablecard">
+        <h3>大文件查找 <span class="sub">只读扫描；删除为永久删除，不进回收站</span></h3>
+        <div class="inlinebar" style="margin-bottom:12px">
+          <input class="inp" id="bigPath" style="width:210px" placeholder="扫描路径，如 C:\" />
+          <input class="inp" id="bigMin" type="number" min="1" max="102400" step="10" style="width:120px" value="100" />
+          <span class="hint">MB 以上</span>
+          <button class="btn primary" id="bigScanBtn">扫描大文件</button>
+          <button class="btn danger" id="bigDelBtn" disabled>删除选中</button>
+          <span class="hint" id="bigSummary"></span>
+        </div>
+        <table>
+          <thead>
+            <tr><th style="width:38px"></th><th>文件</th><th style="text-align:right;width:110px">大小</th>
+                <th style="width:150px">修改时间</th></tr>
+          </thead>
+          <tbody id="bigBody"></tbody>
+        </table>
+        <div class="empty" id="bigEmpty">输入路径后点击「扫描大文件」</div>
+      </div>
+
+      <p class="sysnote">
+        清理为<b>永久删除</b>（不进回收站）；正在被程序占用的文件会跳过并计入失败数。<br/>
+        系统目录（Windows / Program Files）下的文件一律拒绝删除；涉及系统盘的目录可能需要管理员权限。
+      </p>
+    </section>
   </div>
 
   <!-- 确认弹窗 -->
@@ -627,6 +710,18 @@
       <div class="actions">
         <button class="btn" id="svcModalCancel">取消</button>
         <button class="btn danger" id="svcModalOk">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 磁盘清理确认弹窗 -->
+  <div class="modal-mask" id="diskModal" style="z-index:60">
+    <div class="modal">
+      <h3 id="diskModalTitle">确认操作？</h3>
+      <div id="diskModalBody"></div>
+      <div class="actions">
+        <button class="btn" id="diskModalCancel">取消</button>
+        <button class="btn danger" id="diskModalOk">确认删除</button>
       </div>
     </div>
   </div>
@@ -1484,6 +1579,233 @@
     } else { clearInterval(svcTimer); svcTimer = null; }
   });
 
+  // ===================== 磁盘清理 =====================
+  let disks = [];
+  let disksLoaded = false;
+  let cleanItems = [];
+  let cleanSel = new Set();
+  let bigFiles = [];
+  let bigSel = new Set();
+  let diskConfirm = null;
+
+  function openDiskConfirm(title, bodyHtml, onOk) {
+    diskConfirm = onOk;
+    $("diskModalTitle").textContent = title;
+    $("diskModalBody").innerHTML = bodyHtml;
+    $("diskModal").classList.add("show");
+  }
+  function closeDiskConfirm() { $("diskModal").classList.remove("show"); diskConfirm = null; }
+  $("diskModalOk").onclick = () => { const fn = diskConfirm; closeDiskConfirm(); if (fn) fn(); };
+  $("diskModalCancel").onclick = closeDiskConfirm;
+  $("diskModal").addEventListener("click", (e) => { if (e.target.id === "diskModal") closeDiskConfirm(); });
+
+  async function fetchDisks() {
+    try {
+      const d = await (await fetch("/api/disks", { cache: "no-store" })).json();
+      disks = d.disks || [];
+      disksLoaded = true;
+      $("diskBadge").className = "badge " + (d.ok === false ? "st-warn" : "st-ok");
+      $("diskBadgeTxt").textContent = d.ok === false ? "获取失败" : disks.length + " 个分区";
+      renderDisks();
+      if (d.ok === false) toast("获取磁盘信息失败：" + (d.error || "未知原因"), false);
+    } catch (e) {
+      toast("获取磁盘信息失败：" + e.message, false);
+    }
+  }
+
+  function renderDisks() {
+    const g = $("diskGrid");
+    g.innerHTML = "";
+    for (const d of disks) {
+      const ready = d.ready !== false;
+      const pct = d.usedPct;
+      const color = !ready ? "var(--muted)"
+        : pct >= 90 ? "var(--danger)" : pct >= 75 ? "var(--warn)" : "var(--ok)";
+      const card = document.createElement("div");
+      card.className = "disk";
+      card.innerHTML =
+        '<div class="dh"><div class="dl"' + (ready ? '' : ' style="opacity:.55"') + '>' +
+            esc(d.drive.replace("\\", "")) + '</div>' +
+          '<div style="min-width:0"><div class="dt">' + esc(d.label || d.drive) + '</div>' +
+          '<div class="ds">' + esc(d.type) + ' · ' + esc(d.fs || (ready ? "—" : "未就绪")) + '</div></div>' +
+          '<div class="dp" style="color:' + color + '">' + (ready ? pct + "%" : "—") + '</div></div>' +
+        '<div class="dbar"><i style="width:' + (ready ? Math.min(100, pct) : 0) +
+            '%;background:' + color + '"></i></div>' +
+        '<div class="dn">' + (ready
+          ? '<span>已用 ' + fmtB(d.used) + '</span><span>可用 ' + fmtB(d.free) + ' / ' + fmtB(d.total) + '</span>'
+          : '<span>无介质 / 不可访问</span><span>—</span>') + '</div>';
+      g.appendChild(card);
+    }
+  }
+
+  async function scanClean() {
+    const btn = $("cleanScanBtn");
+    btn.innerHTML = '<span class="spin"></span> 扫描中';
+    btn.disabled = true;
+    try {
+      const r = await fetch("/api/clean_scan", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+      const d = await r.json();
+      cleanItems = d.items || [];
+      cleanSel = new Set(cleanItems.filter((x) => x.recommended && x.size > 0).map((x) => x.id));
+      renderClean();
+      if (d.truncated) toast("扫描超时，部分目录未统计完整", "warn");
+    } catch (e) {
+      toast("扫描失败：" + e.message, false);
+    } finally {
+      btn.textContent = "扫描可清理项";
+      btn.disabled = false;
+    }
+  }
+
+  function renderClean() {
+    const tb = $("cleanBody");
+    tb.innerHTML = "";
+    $("cleanEmpty").style.display = cleanItems.length ? "none" : "block";
+    let total = 0;
+    for (const it of cleanItems) {
+      if (cleanSel.has(it.id)) total += it.size;
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td><input type="checkbox" class="chk" data-id="' + esc(it.id) + '"' +
+          (cleanSel.has(it.id) ? " checked" : "") + (it.size ? "" : " disabled") + '></td>' +
+        '<td>' + esc(it.name) +
+          (it.exists ? "" : ' <span style="color:var(--muted);font-size:11px">（不存在）</span>') + '</td>' +
+        '<td><span class="fpath" title="' + esc(it.path) + '">' + esc(it.path) + '</span></td>' +
+        '<td class="mb">' + fmtB(it.size) + '</td>' +
+        '<td class="mb">' + (it.files || "—") + '</td>';
+      tb.appendChild(tr);
+    }
+    $("cleanSummary").textContent = cleanItems.length
+      ? "共 " + cleanItems.length + " 类 · 已选 " + fmtB(total) : "尚未扫描";
+    $("cleanRunBtn").disabled = !(cleanSel.size && total > 0);
+  }
+
+  $("cleanBody").addEventListener("change", (e) => {
+    const c = e.target.closest(".chk");
+    if (!c) return;
+    if (c.checked) cleanSel.add(c.dataset.id); else cleanSel.delete(c.dataset.id);
+    renderClean();
+  });
+  $("cleanScanBtn").onclick = scanClean;
+  $("cleanRunBtn").onclick = () => {
+    const picked = cleanItems.filter((x) => cleanSel.has(x.id));
+    if (!picked.length) return;
+    const total = picked.reduce((s, x) => s + x.size, 0);
+    openDiskConfirm("确认清理选中项？",
+      "<p>将永久删除以下类别中的文件（不进回收站）：</p><ul>" +
+      picked.map((x) => "<li>" + esc(x.name) + " · " + fmtB(x.size) + "</li>").join("") + "</ul>" +
+      "<p>预计释放 <b>" + fmtB(total) + "</b>。被程序占用的文件会被跳过。</p>" +
+      '<p class="warnbox">删除后不可恢复，请确认没有程序正在使用这些文件。</p>',
+      runClean);
+  };
+
+  async function runClean() {
+    const ids = [...cleanSel];
+    toast("清理中，请稍候…", "ok");
+    try {
+      const r = await fetch("/api/clean", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const d = await r.json();
+      if (d.removed) toast("已删除 " + d.removed + " 个文件，释放 " + fmtB(d.freed) +
+        (d.failed ? "，跳过 " + d.failed + " 个（占用/无权限）" : ""), true);
+      else toast("没有文件被删除" + (d.failed ? "（" + d.failed + " 个被占用或无权限）" : ""), "warn");
+      cleanSel = new Set();
+      await scanClean();
+      fetchDisks();
+    } catch (e) {
+      toast("清理失败：" + e.message, false);
+    }
+  }
+
+  async function scanBig() {
+    const path = ($("bigPath").value || "").trim();
+    if (!path) { toast("请输入扫描路径", false); return; }
+    const btn = $("bigScanBtn");
+    btn.innerHTML = '<span class="spin"></span> 扫描中';
+    btn.disabled = true;
+    try {
+      const r = await fetch("/api/bigfiles", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: path, min_mb: Number($("bigMin").value) || 100, limit: 50 }),
+      });
+      const d = await r.json();
+      bigFiles = d.files || [];
+      bigSel = new Set();
+      renderBig();
+      $("bigSummary").textContent = d.error ? d.error
+        : "扫描 " + (d.scanned || 0) + " 个文件，命中 " + bigFiles.length + " 个" +
+          (d.truncated ? "（已超时截断）" : "");
+      if (d.error) toast(d.error, false);
+    } catch (e) {
+      toast("扫描失败：" + e.message, false);
+    } finally {
+      btn.textContent = "扫描大文件";
+      btn.disabled = false;
+    }
+  }
+
+  function renderBig() {
+    const tb = $("bigBody");
+    tb.innerHTML = "";
+    $("bigEmpty").style.display = bigFiles.length ? "none" : "block";
+    let total = 0;
+    for (const f of bigFiles) {
+      if (bigSel.has(f.path)) total += f.size;
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td><input type="checkbox" class="chk" data-p="' + esc(f.path) + '"' +
+          (bigSel.has(f.path) ? " checked" : "") + '></td>' +
+        '<td><span class="fpath" title="' + esc(f.path) + '">' + esc(f.path) + '</span></td>' +
+        '<td class="mb">' + fmtB(f.size) + '</td>' +
+        '<td class="mb">' + esc(fmtClock(f.mtime * 1000)) + '</td>';
+      tb.appendChild(tr);
+    }
+    $("bigDelBtn").disabled = !bigSel.size;
+    if (bigSel.size) $("bigSummary").textContent = "已选 " + bigSel.size + " 个文件 · " + fmtB(total);
+  }
+
+  $("bigBody").addEventListener("change", (e) => {
+    const c = e.target.closest(".chk");
+    if (!c) return;
+    if (c.checked) bigSel.add(c.dataset.p); else bigSel.delete(c.dataset.p);
+    renderBig();
+  });
+  $("bigScanBtn").onclick = scanBig;
+  $("bigDelBtn").onclick = () => {
+    const paths = [...bigSel];
+    if (!paths.length) return;
+    const total = bigFiles.filter((f) => bigSel.has(f.path)).reduce((s, f) => s + f.size, 0);
+    openDiskConfirm("确认删除选中的 " + paths.length + " 个文件？",
+      "<p>将永久删除以下文件（不进回收站）：</p><ul>" +
+      paths.slice(0, 8).map((p) => "<li>" + esc(p) + "</li>").join("") +
+      (paths.length > 8 ? "<li>…等共 " + paths.length + " 个</li>" : "") + "</ul>" +
+      "<p>预计释放 <b>" + fmtB(total) + "</b>。</p>" +
+      '<p class="warnbox">删除后不可恢复；系统目录下的文件会被服务端拒绝。</p>',
+      () => runDeleteBig(paths));
+  };
+
+  async function runDeleteBig(paths) {
+    try {
+      const r = await fetch("/api/delete_paths", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: paths }),
+      });
+      const d = await r.json();
+      if (d.removed) toast("已删除 " + d.removed + " 个文件，释放 " + fmtB(d.freed) +
+        (d.failed ? "，失败/拒绝 " + d.failed + " 个" : ""), true);
+      else toast("没有文件被删除" + (d.failed ? "（" + d.failed + " 个失败，可能无权限或受保护）" : ""), "warn");
+      bigSel = new Set();
+      await scanBig();
+      fetchDisks();
+    } catch (e) {
+      toast("删除失败：" + e.message, false);
+    }
+  }
+
   // ===================== Tab 切换 =====================
   let curView = "ports";
   function switchView(v) {
@@ -1492,8 +1814,10 @@
     $("view-ports").hidden = v !== "ports";
     $("view-sysmon").hidden = v !== "sysmon";
     $("view-services").hidden = v !== "services";
+    $("view-disks").hidden = v !== "disks";
     if (v === "ports") fetchPorts();
     else if (v === "services") { if (!svcLoaded) fetchServices(); }
+    else if (v === "disks") { if (!disksLoaded) fetchDisks(); }
     else { requestAnimationFrame(drawChart); if (!metrics) sysTick(); }
   }
   $("tabs").addEventListener("click", (e) => {
