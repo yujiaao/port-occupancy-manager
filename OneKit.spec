@@ -3,7 +3,7 @@
 
 a = Analysis(
     ['server.py'],
-    pathex=[],
+    pathex=[SPECPATH],
     binaries=[],
     datas=[('index.html', '.'), ('static', 'static')],
     hiddenimports=[],

@@ -217,7 +217,17 @@ pyinstaller OneKit.spec --noconfirm   # 产物： dist/OneKit.exe
 
 ```
 onekit/
-├── server.py              # 后端：端口查询 / 进程终止 / 系统服务 / 内存采集 API（同时托管 static/）
+├── server.py              # 启动入口：解析端口参数并拉起 HTTP 服务
+├── onekit/                # 后端实现（按功能域拆分，便于扩展与维护）
+│   ├── config.py          # 路径定位与全局常量
+│   ├── shell.py           # 外部命令 / PowerShell 调用封装
+│   ├── winapi.py          # Windows 原生 API（内存 / 磁盘 / 管理员 / 运行时长）
+│   ├── ports.py           # 端口占用查询与进程终止
+│   ├── memory.py          # 系统内存（提交空间）监控与内存大户进程
+│   ├── services.py        # Windows 服务列表与启停
+│   ├── disks.py           # 分区容量 / 垃圾清理 / 大文件
+│   ├── search.py          # 目录全文搜索与搜索历史
+│   └── http_app.py        # HTTP 路由层（Handler，路由表可扩展）
 ├── index.html             # 前端入口：Tab 结构 + 弹窗，样式与脚本外链到 static/
 ├── static/
 │   ├── styles.css         # 全部样式（玻璃拟态深色主题）
