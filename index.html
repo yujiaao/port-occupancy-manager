@@ -3,369 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>端口占用管理器 · Port Inspector</title>
-<style>
-  :root {
-    --bg: #0b0e14;
-    --panel: rgba(22, 27, 38, 0.72);
-    --panel-border: rgba(255, 255, 255, 0.08);
-    --text: #e6e9ef;
-    --muted: #8b93a7;
-    --accent: #4f9dff;
-    --accent2: #9b6bff;
-    --danger: #ff5d6c;
-    --ok: #38d39f;
-    --warn: #ffb454;
-    --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body {
-    margin: 0;
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
-    color: var(--text);
-    background: var(--bg);
-    overflow-x: hidden;
-  }
-  /* 背景光斑 */
-  .bg-orbs { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
-  .bg-orbs span {
-    position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.35;
-  }
-  .bg-orbs .o1 { width: 460px; height: 460px; background: #2b6fff; top: -120px; left: -80px; }
-  .bg-orbs .o2 { width: 420px; height: 420px; background: #8a4bff; bottom: -140px; right: -60px; }
-  .bg-orbs .o3 { width: 300px; height: 300px; background: #16b59a; top: 40%; left: 55%; opacity: 0.18; }
-
-  .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 32px 22px 60px; }
-
-  header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
-  .logo {
-    width: 46px; height: 46px; border-radius: 13px; flex: none;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    display: grid; place-items: center; box-shadow: 0 8px 24px rgba(79,157,255,0.35);
-  }
-  .logo svg { width: 26px; height: 26px; }
-  h1 { font-size: 22px; margin: 0; letter-spacing: 0.3px; }
-  .sub { color: var(--muted); font-size: 13px; margin-top: 3px; }
-
-  /* 统计卡片 */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
-  .stat {
-    background: var(--panel); border: 1px solid var(--panel-border);
-    border-radius: 16px; padding: 16px 18px; backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
-  }
-  .stat .k { color: var(--muted); font-size: 12px; }
-  .stat .v { font-size: 28px; font-weight: 700; margin-top: 6px; }
-  .stat.c1 .v { color: var(--accent); }
-  .stat.c2 .v { color: var(--accent2); }
-  .stat.c3 .v { color: var(--ok); }
-  .stat.c4 .v { color: var(--warn); }
-
-  /* 工具条 */
-  .toolbar {
-    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-    background: var(--panel); border: 1px solid var(--panel-border);
-    border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow); margin-bottom: 16px;
-  }
-  .search {
-    flex: 1 1 260px; display: flex; align-items: center; gap: 8px;
-    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border);
-    border-radius: 11px; padding: 9px 12px;
-  }
-  .search input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 14px; }
-  .search svg { width: 16px; height: 16px; opacity: 0.6; }
-  .seg { display: flex; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); border-radius: 11px; padding: 3px; }
-  .seg button {
-    border: none; background: none; color: var(--muted); cursor: pointer;
-    padding: 7px 14px; border-radius: 8px; font-size: 13px; transition: 0.15s;
-  }
-  .seg button.active { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
-  .btn {
-    border: 1px solid var(--panel-border); background: rgba(255,255,255,0.05); color: var(--text);
-    padding: 9px 14px; border-radius: 11px; cursor: pointer; font-size: 13px; transition: 0.15s;
-    display: inline-flex; align-items: center; gap: 7px;
-  }
-  .btn:hover { background: rgba(255,255,255,0.12); }
-  .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; color: #fff; }
-  .btn.ghost { padding: 8px 12px; font-size: 12px; }
-  .switch { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-  .switch input { width: 36px; height: 20px; appearance: none; background: rgba(255,255,255,0.15); border-radius: 20px; position: relative; cursor: pointer; transition: 0.2s; }
-  .switch input:checked { background: var(--accent); }
-  .switch input::after { content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: 0.2s; }
-  .switch input:checked::after { left: 18px; }
-  .divider { width: 1px; height: 26px; background: var(--panel-border); }
-
-  /* 按端口终止面板 */
-  .quickbar {
-    background: var(--panel); border: 1px solid rgba(255,93,108,0.25);
-    border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow); margin-bottom: 16px;
-    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
-  }
-  .quickbar .qb-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
-  .quickbar .qb-title svg { width: 17px; height: 17px; color: var(--danger); }
-  .qb-row { display: flex; gap: 8px; align-items: center; }
-  .qb-row input {
-    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); border-radius: 11px;
-    padding: 9px 12px; color: var(--text); font-size: 14px; width: 150px; outline: none;
-  }
-  .qb-row input:focus { border-color: var(--accent); }
-  .btn.danger { background: var(--danger); border: none; color: #fff; }
-  .btn.danger:hover { filter: brightness(1.08); }
-  .qb-hint { color: var(--muted); font-size: 12px; flex: 1 1 200px; }
-
-  /* 表格 */
-  .tablecard {
-    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px;
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow); overflow: hidden;
-  }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  thead th {
-    text-align: left; color: var(--muted); font-weight: 600; font-size: 12px;
-    padding: 13px 16px; border-bottom: 1px solid var(--panel-border); white-space: nowrap;
-  }
-  tbody td { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-  tbody tr:hover { background: rgba(255,255,255,0.035); }
-  .tag { display: inline-block; padding: 2px 9px; border-radius: 6px; font-size: 11px; font-weight: 600; }
-  .tag.tcp { background: rgba(79,157,255,0.16); color: var(--accent); }
-  .tag.udp { background: rgba(155,107,255,0.16); color: var(--accent2); }
-  .tag.listen { background: rgba(56,211,159,0.16); color: var(--ok); }
-  .tag.other { background: rgba(255,180,84,0.14); color: var(--warn); }
-  .pid { font-variant-numeric: tabular-nums; color: var(--muted); }
-  .kill {
-    border: 1px solid rgba(255,93,108,0.4); background: rgba(255,93,108,0.12); color: var(--danger);
-    padding: 6px 13px; border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 600; transition: 0.15s;
-  }
-  .kill:hover { background: var(--danger); color: #fff; }
-  .empty { padding: 50px; text-align: center; color: var(--muted); }
-  .name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  /* 弹窗 */
-  .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; z-index: 50; place-items: center; backdrop-filter: blur(4px); }
-  .modal-mask.show { display: grid; }
-  .modal { width: 420px; max-width: 92vw; max-height: 86vh; overflow: auto; background: #161b26; border: 1px solid var(--panel-border); border-radius: 16px; padding: 22px; box-shadow: var(--shadow); }
-  .modal h3 { margin: 0 0 12px; font-size: 17px; }
-  .modal p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 6px 0; }
-  .modal .hl { color: var(--text); font-weight: 600; }
-  .modal .warnbox { color: var(--warn); }
-  .proc-list { margin: 10px 0 4px; border: 1px solid var(--panel-border); border-radius: 11px; overflow: hidden; }
-  .proc-list .row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 13px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
-  .proc-list .row:last-child { border-bottom: none; }
-  .proc-list .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .proc-list .ppid { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
-  .modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
-  .btn.danger:hover { filter: brightness(1.08); }
-
-  /* toast */
-  #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; transition: 0.25s; z-index: 60; }
-  #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
-  #toast .box { background: #1c2230; border: 1px solid var(--panel-border); color: var(--text); padding: 12px 18px; border-radius: 11px; box-shadow: var(--shadow); font-size: 13px; display: flex; gap: 9px; align-items: center; max-width: 80vw; }
-  #toast .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-  #toast.ok .dot { background: var(--ok); }
-  #toast.err .dot { background: var(--danger); }
-
-  .spin { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff; border-radius: 50%; animation: sp 0.7s linear infinite; display: inline-block; }
-  @keyframes sp { to { transform: rotate(360deg); } }
-
-  /* ===== Tab 切换 ===== */
-  .tabs {
-    display: flex; gap: 6px; margin-bottom: 18px; padding: 5px; width: fit-content; max-width: 100%;
-    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px;
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
-  }
-  .tabs .tab {
-    border: none; background: none; color: var(--muted); cursor: pointer; padding: 9px 18px;
-    border-radius: 10px; font-size: 13.5px; transition: 0.15s; display: inline-flex; align-items: center; gap: 8px;
-  }
-  .tabs .tab:hover { color: var(--text); background: rgba(255,255,255,0.05); }
-  .tabs .tab.active {
-    background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
-    box-shadow: 0 6px 18px rgba(79,157,255,0.28);
-  }
-  .tabs .tab .tdot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); display: none; }
-  .tabs .tab.alert .tdot { display: inline-block; animation: mpulse 0.9s infinite; }
-  @keyframes mpulse { 50% { opacity: 0.3; } }
-
-  /* ===== 系统内存监控 ===== */
-  .sysbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-  .sysbar details.setpanel { flex: 1 1 340px; }
-  .badge {
-    display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px;
-    font-size: 13px; font-weight: 600; border: 1px solid var(--panel-border); background: var(--panel);
-    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  }
-  .badge .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
-  .badge.st-ok .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-  .badge.st-warn .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
-  .badge.st-crit .dot { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: mpulse 0.9s infinite; }
-  .badge.st-ok { color: var(--ok); }
-  .badge.st-warn { color: var(--warn); }
-  .badge.st-crit { color: var(--danger); }
-
-  #banner {
-    display: flex; gap: 14px; align-items: flex-start; padding: 15px 18px; margin-bottom: 16px;
-    border-radius: 16px; border: 1px solid var(--panel-border); background: var(--panel);
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
-    border-left: 4px solid var(--muted);
-  }
-  #banner.st-ok { border-left-color: var(--ok); }
-  #banner.st-warn { border-left-color: var(--warn); }
-  #banner.st-crit { border-left-color: var(--danger); background: linear-gradient(180deg, rgba(255,93,108,0.16), var(--panel)); }
-  #banner.st-off { border-left-color: var(--muted); }
-  .banner-ico { flex: none; width: 34px; height: 34px; margin-top: 2px; display: grid; place-items: center; }
-  .banner-ico svg { width: 28px; height: 28px; }
-  #banner.st-ok .banner-ico svg { stroke: var(--ok); }
-  #banner.st-warn .banner-ico svg { stroke: var(--warn); }
-  #banner.st-crit .banner-ico svg { stroke: var(--danger); }
-  #banner.st-off .banner-ico svg { stroke: var(--muted); }
-  #bannerTitle { font-size: 16px; font-weight: 700; margin: 0 0 3px; }
-  #bannerDesc { font-size: 13px; color: var(--muted); margin: 0 0 6px; line-height: 1.55; }
-  #bannerHint { font-size: 12px; color: var(--muted); opacity: 0.85; line-height: 1.6; margin: 6px 0 0; }
-
-  .stat .s { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.5; }
-  .stat .bar { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; margin-top: 9px; overflow: hidden; }
-  .stat .bar i { display: block; height: 100%; border-radius: 3px; transition: width 0.4s; }
-  .stat.m1 .v { color: var(--accent2); }
-  .stat.m1 .bar i { background: linear-gradient(90deg, var(--accent2), var(--accent)); }
-  .stat.m2 .v { color: var(--accent); }
-  .stat.m2 .bar i { background: linear-gradient(90deg, var(--accent), var(--ok)); }
-  .stat.m3 .v { color: var(--warn); }
-  .stat.m3 .bar i { background: linear-gradient(90deg, var(--warn), var(--ok)); }
-  .stat.m4 .v { color: var(--ok); }
-  .stat.m4 .bar i { background: linear-gradient(90deg, var(--ok), var(--accent)); }
-  .stat.hot .v { color: var(--danger); }
-  .stat.hot .bar i { background: var(--danger); }
-
-  .panel {
-    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px;
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
-    padding: 15px 17px; margin-bottom: 16px;
-  }
-  .panel h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-  .panel h3 .sub { font-size: 11px; font-weight: 400; color: var(--muted); }
-  .gauge { display: grid; grid-template-columns: 118px 1fr 64px; align-items: center; gap: 12px; margin-bottom: 11px; }
-  .gauge:last-child { margin-bottom: 0; }
-  .gauge .g-name { font-size: 12px; color: var(--muted); }
-  .gauge .track { height: 10px; background: rgba(255,255,255,0.07); border-radius: 6px; overflow: hidden; }
-  .gauge .track i { display: block; height: 100%; border-radius: 6px; transition: width 0.5s, background 0.3s; }
-  .gauge .g-val { text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; font-family: "Cascadia Mono", Consolas, monospace; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); align-items: center; }
-  .legend span { display: inline-flex; align-items: center; gap: 5px; }
-  .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
-  #chart { display: block; width: 100%; height: 200px; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 13px; }
-  .kv dt { color: var(--muted); white-space: nowrap; }
-  .kv dd { margin: 0; font-variant-numeric: tabular-nums; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; text-align: right; word-break: break-all; }
-  .kv dd.big { color: var(--danger); font-weight: 700; }
-  .kv dd.sep { grid-column: 1 / -1; border-top: 1px dashed rgba(255,255,255,0.08); height: 0; padding: 0; }
-  .rank { color: var(--muted); width: 34px; }
-  .pname { display: flex; align-items: center; gap: 9px; }
-  .pname .nm { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pname .pid { color: var(--muted); font-size: 11px; flex: none; }
-  .pname .icon { flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: rgba(255,255,255,0.07); font-size: 11px; }
-  .hot-lv1 { color: var(--warn); }
-  .hot-lv2 { color: var(--danger); font-weight: 700; }
-  .mb { text-align: right; font-family: "Cascadia Mono", Consolas, monospace; }
-
-  details.setpanel { margin-bottom: 16px; }
-  details.setpanel > summary {
-    list-style: none; cursor: pointer; background: var(--panel); border: 1px solid var(--panel-border);
-    border-radius: 12px; padding: 10px 16px; font-size: 13px; backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px); box-shadow: var(--shadow); display: flex; align-items: center; gap: 9px;
-  }
-  details.setpanel > summary::-webkit-details-marker { display: none; }
-  details.setpanel > summary::after { content: "▾"; margin-left: auto; color: var(--muted); transition: 0.2s; }
-  details.setpanel[open] > summary::after { transform: rotate(180deg); }
-  .setgrid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 12px; margin-top: 12px;
-    padding: 16px; background: var(--panel); border: 1px solid var(--panel-border);
-    border-radius: 0 0 12px 12px; border-top: none; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  }
-  .setitem { display: flex; flex-direction: column; gap: 6px; }
-  .setitem label { font-size: 12px; color: var(--muted); }
-  .setitem input[type="number"] {
-    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text);
-    border-radius: 9px; padding: 7px 10px; font-size: 13px; outline: none; font-family: "Cascadia Mono", Consolas, monospace;
-  }
-  .setgrid .switch { justify-content: space-between; color: var(--text); }
-  .set-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; grid-column: 1 / -1; padding-top: 4px; }
-  .hint { font-size: 11.5px; color: var(--muted); line-height: 1.6; }
-  #toast.warn .dot { background: var(--warn); }
-  #alertModal .modal { width: 460px; border: 1px solid rgba(255,93,108,0.5); animation: mpop 0.22s ease; }
-  #alertModal h3 { color: var(--danger); display: flex; align-items: center; gap: 9px; }
-  #alertModal ul { margin: 8px 0 12px; padding-left: 18px; color: var(--text); font-size: 13px; line-height: 1.7; }
-  #alertModal ul li::marker { color: var(--danger); }
-  #alertModal .tip {
-    background: rgba(255,180,84,0.1); border: 1px solid rgba(255,180,84,0.25); color: var(--warn);
-    border-radius: 10px; padding: 9px 12px; font-size: 12px; line-height: 1.6; margin-top: 6px;
-  }
-  @keyframes mpop { from { transform: scale(0.92); opacity: 0; } }
-  .sysnote { color: var(--muted); font-size: 11.5px; line-height: 1.75; margin: 0 0 16px; }
-
-  /* ===== 系统服务 ===== */
-  .stat.s1 .v { color: var(--accent); }
-  .stat.s2 .v { color: var(--ok); }
-  .stat.s3 .v { color: var(--muted); }
-  .stat.s4 .v { color: var(--accent2); }
-  .tag.run { background: rgba(56,211,159,0.16); color: var(--ok); }
-  .tag.stopped { background: rgba(255,255,255,0.08); color: var(--muted); }
-  .tag.mode-auto { background: rgba(79,157,255,0.14); color: var(--accent); }
-  .tag.mode-manual { background: rgba(155,107,255,0.14); color: var(--accent2); }
-  .tag.mode-disabled { background: rgba(255,180,84,0.14); color: var(--warn); }
-  .svcname { display: flex; flex-direction: column; gap: 2px; }
-  .svcname .d { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .svcname .n { color: var(--muted); font-size: 11px; }
-  .svcbtn {
-    border: 1px solid var(--panel-border); background: rgba(255,255,255,0.05); color: var(--text);
-    padding: 5px 11px; border-radius: 8px; cursor: pointer; font-size: 12px; transition: 0.15s;
-  }
-  .svcbtn.start { border-color: rgba(56,211,159,0.4); color: var(--ok); }
-  .svcbtn.start:hover:not(:disabled) { background: var(--ok); color: #06131a; }
-  .svcbtn.stop { border-color: rgba(255,93,108,0.4); color: var(--danger); }
-  .svcbtn.stop:hover:not(:disabled) { background: var(--danger); color: #fff; }
-  .svcbtn:disabled { opacity: 0.32; cursor: not-allowed; }
-  .svcsel {
-    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); color: var(--text);
-    border-radius: 8px; padding: 5px 8px; font-size: 12px; outline: none; cursor: pointer;
-  }
-  .svcsel:disabled { opacity: 0.32; cursor: not-allowed; }
-
-  /* ===== 磁盘清理 ===== */
-  .diskgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 13px; margin-bottom: 16px; }
-  .disk {
-    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 15px; padding: 14px 16px;
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow);
-  }
-  .disk .dh { display: flex; align-items: center; gap: 10px; }
-  .disk .dl {
-    width: 38px; height: 38px; border-radius: 11px; flex: none; display: grid; place-items: center;
-    font-weight: 700; font-size: 15px; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent2));
-  }
-  .disk .dt { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .disk .ds { font-size: 11px; color: var(--muted); }
-  .disk .dp { margin-left: auto; font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .disk .dbar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 5px; margin: 11px 0 8px; overflow: hidden; }
-  .disk .dbar i { display: block; height: 100%; border-radius: 5px; transition: width 0.4s, background 0.3s; }
-  .disk .dn { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .chk { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
-  .fpath { max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; font-size: 12.5px; }
-  .inp {
-    background: rgba(0,0,0,0.25); border: 1px solid var(--panel-border); border-radius: 11px;
-    padding: 9px 12px; color: var(--text); font-size: 13px; outline: none;
-  }
-  .inp:focus { border-color: var(--accent); }
-  .inlinebar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-
-  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
-  @media (max-width: 720px) {
-    .stats { grid-template-columns: repeat(2, 1fr); }
-    .qb-hint { flex-basis: 100%; }
-  }
-</style>
+<title>OneKit · 本地开发运维工具箱</title>
+<link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
   <div class="bg-orbs"><span class="o1"></span><span class="o2"></span><span class="o3"></span></div>
@@ -378,8 +17,8 @@
         </svg>
       </div>
       <div>
-        <h1>端口占用管理器</h1>
-        <div class="sub">查看本地端口占用 · 按需终止进程 · 零依赖本地工具</div>
+        <h1>OneKit · 本地开发运维工具箱</h1>
+        <div class="sub">端口占用 · 内存监控 · 系统服务 · 磁盘清理 · 代码搜索 · 编码转换 · 零依赖本地工具</div>
       </div>
     </header>
 
@@ -408,6 +47,42 @@
           <ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>
         </svg>
         磁盘清理
+      </button>
+      <button class="tab" data-view="search">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+        </svg>
+        代码搜索
+      </button>
+      <button class="tab" data-view="jwt">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        JWT 解密
+      </button>
+      <button class="tab" data-view="jsonfmt">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-1"/>
+        </svg>
+        JSON 格式化
+      </button>
+      <button class="tab" data-view="tsconv">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+        </svg>
+        时间戳转换
+      </button>
+      <button class="tab" data-view="b64">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 10h.01M12 10h.01M16 10h.01M8 14h8"/>
+        </svg>
+        Base64 编解码
+      </button>
+      <button class="tab" data-view="utf8">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 7h16M4 12h10M4 17h7"/>
+        </svg>
+        UTF-8 转义
       </button>
     </div>
 
@@ -688,6 +363,239 @@
         系统目录（Windows / Program Files）下的文件一律拒绝删除；涉及系统盘的目录可能需要管理员权限。
       </p>
     </section>
+
+    <section id="view-search" hidden>
+      <div class="sysbar">
+        <span class="badge" id="searchBadge"><span class="dot"></span><span id="searchBadgeTxt">待命</span></span>
+        <span class="hint">递归搜索目录内文本文件内容，自动跳过 .git 等版本库、压缩包与二进制文件；下方可勾选要搜索的范围（代码 / 配置文件 / 其他文本，可多选）。</span>
+      </div>
+
+      <div class="panel">
+        <div class="search-row">
+          <label>目录</label>
+          <input id="searchDir" class="inp" list="dirHistory" placeholder="要搜索的目录，如 C:\Projects\myapp 或 /home/user/code" style="flex:1 1 360px" />
+          <datalist id="dirHistory"></datalist>
+          <button class="btn primary" id="searchBtn">搜索</button>
+        </div>
+        <div class="search-row">
+          <label>关键词</label>
+          <input id="searchQuery" class="inp" placeholder="要查找的文本（正则模式可填表达式）" style="flex:1 1 360px" />
+        </div>
+        <div class="search-row opts">
+          <div class="seg" id="searchModeSeg">
+            <button data-mode="text" class="active">普通文本</button>
+            <button data-mode="regex">正则</button>
+          </div>
+          <label class="switch"><input type="checkbox" id="searchCase" /> 区分大小写</label>
+          <label class="switch"><input type="checkbox" id="searchNameOnly" /> 仅按文件名</label>
+          <label class="switch"><input type="checkbox" id="searchSubdir" checked /> 包含子目录</label>
+          <span class="scope-lbl">搜索范围</span>
+          <label class="scopecb-lbl"><input type="checkbox" class="scope-cb" value="code" checked /> 代码</label>
+          <label class="scopecb-lbl"><input type="checkbox" class="scope-cb" value="config" checked /> 配置文件</label>
+          <label class="scopecb-lbl"><input type="checkbox" class="scope-cb" value="other" checked /> 其他文本</label>
+          <label class="num">超时(秒)<input id="searchTimeout" class="inp" type="number" min="5" max="3600" value="600" /></label>
+          <input id="searchExt" class="inp" placeholder="仅这些后缀(可选)，如 py,js,vue" style="flex:0 1 240px" />
+        </div>
+      </div>
+
+      <div class="stats" id="searchStats" style="display:none">
+        <div class="stat g1"><div class="k">扫描文本文件</div><div class="v" id="ss-scanned">0</div></div>
+        <div class="stat g2"><div class="k">命中文件</div><div class="v" id="ss-hit">0</div></div>
+        <div class="stat g3"><div class="k">代码/配置/其他</div><div class="v" id="ss-groups">0/0/0</div></div>
+        <div class="stat g4"><div class="k">跳过 二进制/压缩/VCS</div><div class="v" id="ss-skip">0/0/0</div></div>
+      </div>
+
+      <div class="panel" id="searchResults" style="display:none">
+        <h3>搜索结果 <span class="sub">点击文件展开匹配行（已自动高亮关键词）</span></h3>
+        <div class="res-group">
+          <h3 class="gh">代码文件 <span class="cnt" id="cnt-code">0</span></h3>
+          <div class="res-list" id="list-code"></div>
+        </div>
+        <div class="res-group">
+          <h3 class="gh">配置文件 <span class="cnt" id="cnt-config">0</span></h3>
+          <div class="res-list" id="list-config"></div>
+        </div>
+        <div class="res-group">
+          <h3 class="gh">其他文本 <span class="cnt" id="cnt-other">0</span></h3>
+          <div class="res-list" id="list-other"></div>
+        </div>
+        <div class="empty" id="searchEmpty" style="display:none">没有匹配的结果</div>
+      </div>
+    </section>
+
+    <section id="view-jwt" hidden>
+      <div class="sysbar">
+        <span class="badge" id="jwtBadge"><span class="dot"></span><span id="jwtBadgeTxt">待输入</span></span>
+        <span class="hint">粘贴 JWT（三段用 . 分隔），自动解码 Header / Payload；可选填入密钥做签名校验（全程在本地，token 不上传）</span>
+      </div>
+
+      <div class="panel">
+        <div class="jwt-in">
+          <label>JWT</label>
+          <textarea id="jwtInput" class="inp" rows="4" placeholder="粘贴形如 eyJhbG... . eyJzdWI... . SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c 的 Token"></textarea>
+        </div>
+      </div>
+
+      <div class="panel" id="jwtResult" style="display:none">
+        <div class="stats" id="jwtClaims"></div>
+
+        <div class="jwt-grid">
+          <div class="jwt-block">
+            <div class="jb-head"><span>Header</span><button class="btn ghost" data-copy="jwtHeader">复制</button></div>
+            <pre class="jwt-json" id="jwtHeader"></pre>
+          </div>
+          <div class="jwt-block">
+            <div class="jb-head"><span>Payload</span><button class="btn ghost" data-copy="jwtPayload">复制</button></div>
+            <pre class="jwt-json" id="jwtPayload"></pre>
+          </div>
+        </div>
+
+        <div class="jwt-verify">
+          <h3>签名校验 <span class="sub">仅本地计算，token 不上传</span></h3>
+          <div class="jwt-alg" id="jwtAlgHint"></div>
+          <div class="search-row">
+            <label>密钥 / 公钥</label>
+            <input id="jwtSecret" class="inp" style="flex:1 1 360px"
+                   placeholder="HS* 填密钥文本；RS*/ES*/PS* 贴 PEM 公钥（BEGIN PUBLIC KEY）" />
+            <button class="btn primary" id="jwtVerifyBtn">校验签名</button>
+          </div>
+          <span class="badge" id="jwtVerifyBadge" style="display:none"><span class="dot"></span><span id="jwtVerifyTxt"></span></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-jsonfmt" hidden>
+      <div class="sysbar">
+        <span class="badge" id="jsonBadge"><span class="dot"></span><span id="jsonBadgeTxt">待输入</span></span>
+        <span class="hint">粘贴 JSON 文本，一键格式化 / 压缩 / 校验，全程在本地浏览器完成</span>
+      </div>
+
+      <div class="panel">
+        <div class="jwt-in">
+          <label>JSON</label>
+          <textarea id="jsonInput" class="inp" rows="6" placeholder='粘贴需要格式化的 JSON，例如 {"a":1,"b":[2,3]}'></textarea>
+        </div>
+        <div class="json-tools">
+          <button class="btn primary" id="jsonFormatBtn">格式化</button>
+          <button class="btn" id="jsonMinifyBtn">压缩</button>
+          <button class="btn" id="jsonValidateBtn">校验</button>
+          <div class="divider"></div>
+          <label class="mini">缩进</label>
+          <select id="jsonIndent" class="sel">
+            <option value="2">2 空格</option>
+            <option value="4">4 空格</option>
+            <option value="tab">Tab</option>
+          </select>
+          <label class="switch"><input type="checkbox" id="jsonSort" /> 排序键</label>
+          <div class="divider"></div>
+          <button class="btn ghost" id="jsonPasteBtn">粘贴</button>
+          <button class="btn ghost" id="jsonCopyBtn">复制结果</button>
+          <button class="btn ghost" id="jsonDownloadBtn">下载</button>
+        </div>
+        <pre class="jwt-json" id="jsonOutput" style="margin-top:12px"></pre>
+        <pre class="json-err" id="jsonErr" style="display:none"></pre>
+      </div>
+    </section>
+
+    <section id="view-tsconv" hidden>
+      <div class="sysbar">
+        <span class="badge" id="tsBadge"><span class="dot"></span><span id="tsBadgeTxt">待输入</span></span>
+        <span class="hint">时间戳(秒/毫秒) ↔ 日期 双向转换，全部在本地浏览器完成</span>
+      </div>
+
+      <div class="panel">
+        <h3>时间戳 → 日期</h3>
+        <div class="search-row">
+          <label>时间戳</label>
+          <input id="tsInput" class="inp" style="flex:1 1 320px" placeholder="如 1700000000 或 1700000000000" inputmode="numeric" />
+          <select id="tsUnit" class="sel">
+            <option value="auto">自动</option>
+            <option value="s">秒 (s)</option>
+            <option value="ms">毫秒 (ms)</option>
+          </select>
+          <button class="btn primary" id="tsNowBtn">现在</button>
+        </div>
+        <div class="ts-out" id="tsOut" style="display:none"></div>
+      </div>
+
+      <div class="panel">
+        <h3>日期 → 时间戳</h3>
+        <div class="search-row">
+          <label>日期</label>
+          <input id="tsDate" class="inp" style="flex:1 1 320px" placeholder="如 2023-11-15 12:00:00 或 2023-11-15T12:00:00Z" />
+          <button class="btn primary" id="tsToStampBtn">转换</button>
+        </div>
+        <div class="ts-out" id="tsOut2" style="display:none"></div>
+      </div>
+    </section>
+
+    <section id="view-b64" hidden>
+      <div class="sysbar">
+        <span class="badge" id="b64Badge"><span class="dot"></span><span id="b64BadgeTxt">待输入</span></span>
+        <span class="hint">文本与 Base64 互转（支持标准 Base64 与 Base64URL），全程在本地浏览器完成</span>
+      </div>
+
+      <div class="panel">
+        <div class="search-row opts">
+          <div class="seg" id="b64DirSeg">
+            <button data-dir="enc" class="active">编码（文本→Base64）</button>
+            <button data-dir="dec">解码（Base64→文本）</button>
+          </div>
+          <div class="seg" id="b64VarSeg">
+            <button data-var="std" class="active">标准 Base64</button>
+            <button data-var="url">Base64URL</button>
+          </div>
+        </div>
+
+        <div class="jwt-in" style="margin-top:12px">
+          <label>输入</label>
+          <textarea id="b64Input" class="inp" rows="5" placeholder="输入要编码的文本，或待解码的 Base64"></textarea>
+        </div>
+
+        <div class="json-tools">
+          <button class="btn primary" id="b64CopyBtn">复制结果</button>
+          <button class="btn" id="b64SwapBtn">↓ 交换输入输出</button>
+          <button class="btn ghost" id="b64ClearBtn">清空</button>
+        </div>
+
+        <pre class="jwt-json" id="b64Output" style="margin-top:12px"></pre>
+        <pre class="json-err" id="b64Err" style="display:none"></pre>
+      </div>
+    </section>
+
+    <section id="view-utf8" hidden>
+      <div class="sysbar">
+        <span class="badge" id="utf8Badge"><span class="dot"></span><span id="utf8BadgeTxt">待输入</span></span>
+        <span class="hint">文本与转义互转：\uXXXX（Unicode）或 \xHH（UTF-8 字节），全程在本地浏览器完成</span>
+      </div>
+
+      <div class="panel">
+        <div class="search-row opts">
+          <div class="seg" id="utf8DirSeg">
+            <button data-dir="enc" class="active">编码（文本→转义）</button>
+            <button data-dir="dec">解码（转义→文本）</button>
+          </div>
+          <div class="seg" id="utf8FmtSeg">
+            <button data-fmt="uni" class="active">\uXXXX</button>
+            <button data-fmt="byte">\xHH（UTF-8 字节）</button>
+          </div>
+        </div>
+
+        <div class="jwt-in" style="margin-top:12px">
+          <label>输入</label>
+          <textarea id="utf8Input" class="inp" rows="5" placeholder="输入文本，或待解码的 \u4e2d\u6587 / \xE4\xB8\xAD 转义串"></textarea>
+        </div>
+
+        <div class="json-tools">
+          <button class="btn primary" id="utf8CopyBtn">复制结果</button>
+          <button class="btn" id="utf8SwapBtn">↓ 交换输入输出</button>
+          <button class="btn ghost" id="utf8ClearBtn">清空</button>
+        </div>
+
+        <pre class="jwt-json" id="utf8Output" style="margin-top:12px"></pre>
+        <pre class="json-err" id="utf8Err" style="display:none"></pre>
+      </div>
+    </section>
   </div>
 
   <!-- 确认弹窗 -->
@@ -739,1097 +647,6 @@
 
   <div id="toast"><div class="box"><span class="dot"></span><span id="toast-msg"></span></div></div>
 
-<script>
-  let allPorts = [];
-  let curProto = "ALL";
-  let autoTimer = null;
-  let pending = null; // {type:'pid', pid} | {type:'port', port, items}
-
-  const $ = (id) => document.getElementById(id);
-
-  async function fetchPorts() {
-    const btn = $("refreshBtn");
-    btn.innerHTML = '<span class="spin"></span> 刷新中';
-    try {
-      const res = await fetch("/api/ports", { cache: "no-store" });
-      const data = await res.json();
-      allPorts = data.ports || [];
-      render();
-    } catch (e) {
-      toast("获取端口失败：" + e.message, false);
-    } finally {
-      btn.textContent = "刷新";
-    }
-  }
-
-  function render() {
-    const q = $("search").value.trim().toLowerCase();
-    const rows = allPorts.filter(p => {
-      if (curProto !== "ALL" && p.protocol !== curProto) return false;
-      if (!q) return true;
-      return (p.local + " " + p.pid + " " + (p.name || "")).toLowerCase().includes(q);
-    });
-
-    // 统计
-    const tcp = allPorts.filter(p => p.protocol === "TCP").length;
-    const listen = allPorts.filter(p => (p.state || "").toUpperCase() === "LISTENING" || (p.state || "").toUpperCase() === "LISTEN").length;
-    const procs = new Set(allPorts.map(p => p.pid)).size;
-    $("s-total").textContent = allPorts.length;
-    $("s-tcp").textContent = tcp;
-    $("s-listen").textContent = listen;
-    $("s-proc").textContent = procs;
-
-    const tbody = $("tbody");
-    tbody.innerHTML = "";
-    $("empty").style.display = rows.length ? "none" : "block";
-
-    for (const p of rows) {
-      const tr = document.createElement("tr");
-      const protoTag = `<span class="tag ${p.protocol.toLowerCase()}">${p.protocol}</span>`;
-      const st = (p.state || "").toUpperCase();
-      const stateTag = st === "LISTENING" || st === "LISTEN"
-        ? `<span class="tag listen">${p.state}</span>`
-        : (p.state ? `<span class="tag other">${p.state}</span>` : '<span class="muted">—</span>');
-      tr.innerHTML = `
-        <td>${protoTag}</td>
-        <td>${p.local}</td>
-        <td>${stateTag}</td>
-        <td class="pid">${p.pid}</td>
-        <td class="name" title="${p.name || ''}">${p.name || "—"}</td>
-        <td style="text-align:right"><button class="kill" data-pid="${p.pid}" data-name="${p.name || ''}" data-port="${p.local}">终止</button></td>`;
-      tbody.appendChild(tr);
-    }
-  }
-
-  // 事件委托：终止按钮
-  $("tbody").addEventListener("click", (e) => {
-    const b = e.target.closest(".kill");
-    if (!b) return;
-    openKillPid(b.dataset.pid, b.dataset.name, b.dataset.port);
-  });
-
-  function openKillPid(pid, name, port) {
-    pending = { type: "pid", pid };
-    $("m-title").textContent = "确认终止进程？";
-    $("m-body").innerHTML = `
-      <p>即将终止进程 <span class="hl">${name || "未知进程"}</span></p>
-      <p>PID：<span class="hl">${pid}</span> ｜ 占用：<span class="hl">${port}</span></p>
-      <p class="warnbox">该操作不可撤销，进程将被强制结束（含其子进程）。</p>`;
-    $("modal").classList.add("show");
-  }
-
-  function openKillPort(port, items) {
-    pending = { type: "port", port, items };
-    const rows = items.map(it =>
-      `<div class="row"><span class="pname">${it.name || "未知进程"} · ${it.local}</span><span class="ppid">PID ${it.pid}</span></div>`
-    ).join("");
-    $("m-title").textContent = `确认终止端口 ${port} 上的全部进程？`;
-    $("m-body").innerHTML = `
-      <p>以下进程正在占用端口 <span class="hl">${port}</span>（共 ${items.length} 个）：</p>
-      <div class="proc-list">${rows}</div>
-      <p class="warnbox">该操作不可撤销，这些进程将被强制结束（含其子进程）。</p>`;
-    $("modal").classList.add("show");
-  }
-
-  function closeModal() { $("modal").classList.remove("show"); pending = null; }
-
-  $("m-cancel").onclick = closeModal;
-  $("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
-
-  $("m-confirm").onclick = async () => {
-    if (!pending) return;
-    const task = pending;
-    closeModal();
-    try {
-      let res, data;
-      if (task.type === "pid") {
-        res = await fetch("/api/kill", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pid: Number(task.pid) })
-        });
-        data = await res.json();
-        if (data.success) toast(`已终止 PID ${task.pid}`, true);
-        else toast("终止失败：" + (data.error || data.message || "未知错误"), false);
-      } else {
-        res = await fetch("/api/kill_port", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ port: Number(task.port) })
-        });
-        data = await res.json();
-        if (data.success) toast(`端口 ${task.port} 已清理：${data.killed.length} 个进程已终止` + (data.skipped.length ? `，${data.skipped.length} 个跳过` : ""), true);
-        else toast("终止失败：" + (data.error || "未知错误"), false);
-      }
-    } catch (e) {
-      toast("请求失败：" + e.message, false);
-    } finally {
-      setTimeout(fetchPorts, 500);
-    }
-  };
-
-  // 按端口号终止
-  $("killPortBtn").onclick = async () => {
-    const port = parseInt($("portInput").value, 10);
-    if (!port || port < 1 || port > 65535) { toast("请输入有效的端口号（1-65535）", false); return; }
-    const btn = $("killPortBtn");
-    btn.innerHTML = '<span class="spin"></span> 查找中';
-    try {
-      const res = await fetch("/api/ports", { cache: "no-store" });
-      const data = await res.json();
-      const items = (data.ports || []).filter(p => {
-        const lp = p.local.split(":").pop();
-        return parseInt(lp, 10) === port;
-      });
-      if (!items.length) { toast(`端口 ${port} 上未发现任何连接`, false); return; }
-      openKillPort(port, items);
-    } catch (e) {
-      toast("查询失败：" + e.message, false);
-    } finally {
-      btn.textContent = "查找并终止";
-    }
-  };
-  $("portInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("killPortBtn").click(); });
-
-  // 导出
-  function download(filename, text, mime) {
-    const blob = new Blob([text], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  }
-  $("exportCsv").onclick = () => {
-    if (!allPorts.length) { toast("当前没有数据可导出", false); return; }
-    const header = ["协议", "本地地址", "状态", "PID", "进程名"];
-    const lines = [header.join(",")];
-    for (const p of allPorts) {
-      const row = [p.protocol, p.local, p.state || "", p.pid, p.name || ""]
-        .map(v => `"${String(v).replace(/"/g, '""')}"`);
-      lines.push(row.join(","));
-    }
-    // BOM 让 Excel 正确识别中文
-    download(`ports_${Date.now()}.csv`, "﻿" + lines.join("\r\n"), "text/csv;charset=utf-8");
-    toast(`已导出 ${allPorts.length} 条到 CSV`, true);
-  };
-  $("exportJson").onclick = () => {
-    if (!allPorts.length) { toast("当前没有数据可导出", false); return; }
-    download(`ports_${Date.now()}.json`, JSON.stringify(allPorts, null, 2), "application/json");
-    toast(`已导出 ${allPorts.length} 条到 JSON`, true);
-  };
-
-  // 搜索 / 筛选
-  $("search").addEventListener("input", render);
-  $("protoSeg").addEventListener("click", (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    [...$("protoSeg").children].forEach(x => x.classList.remove("active"));
-    b.classList.add("active");
-    curProto = b.dataset.proto;
-    render();
-  });
-
-  $("refreshBtn").onclick = fetchPorts;
-  $("autoRefresh").addEventListener("change", (e) => {
-    if (e.target.checked) { autoTimer = setInterval(fetchPorts, 3000); }
-    else { clearInterval(autoTimer); autoTimer = null; }
-  });
-
-  let toastTimer = null;
-  // type: "ok" | "warn" | "err"（兼容历史调用 true/false）
-  function toast(msg, type) {
-    const t = $("toast");
-    t.className = type === true ? "ok" : type === false ? "err" : (type || "ok");
-    $("toast-msg").textContent = msg;
-    t.classList.add("show");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove("show"), 3000);
-  }
-
-  // ===================== 系统内存监控 =====================
-  const GB = 1024 ** 3;
-  const MB = 1024 ** 2;
-  const SETTINGS_KEY = "portinspector_sysmon_v1";
-  const BASE_TITLE = document.title;
-  const MAX_POINTS = 240;
-
-  const sysDefaults = {
-    refreshSec: 2,
-    warnAvailGb: 2,       // commit 剩余 < 2GB -> 警告
-    critAvailGb: 0.5,     // commit 剩余 < 0.5GB -> 严重（崩溃现场仅 63MB）
-    warnCommitPct: 85,
-    critCommitPct: 95,
-    warnPhysGb: 4,
-    critPhysGb: 1,
-    predict: true,
-    predictWarnMin: 60,
-    predictCritMin: 15,
-    sound: true,
-    notif: true,
-    popup: true,
-    snoozeMin: 5,
-  };
-
-  let S = loadSysSettings();
-  let mHistory = [];        // {t, ca, pa} 字节
-  let metrics = null;       // 最新指标
-  let memLevel = "off";     // ok | warn | crit | off
-  let activeCrit = false;   // 已告警且未恢复/未静默
-  let snoozeUntil = 0;
-  let sysFail = 0;
-  let lastTick = 0;
-  let sysTimer = null;
-  let titleFlash = null;
-  let audioCtx = null;
-  let topSig = "";
-  let prevLevel = "off";
-  let audioUnlocked = false;
-
-  function loadSysSettings() {
-    const out = Object.assign({}, sysDefaults);
-    try {
-      const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
-      for (const k in raw) if (k in sysDefaults) out[k] = raw[k];
-    } catch (e) { /* 忽略损坏的本地设置 */ }
-    return out;
-  }
-  function saveSysSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(S)); } catch (e) {}
-  }
-  function syncSysSettingsUI() {
-    document.querySelectorAll("[data-key]").forEach((el) => {
-      const k = el.dataset.key;
-      if (el.type === "checkbox") el.checked = !!S[k];
-      else el.value = S[k];
-    });
-  }
-  document.querySelectorAll("[data-key]").forEach((el) => {
-    el.addEventListener("change", () => {
-      const k = el.dataset.key;
-      if (el.type === "checkbox") S[k] = el.checked;
-      else { const v = parseFloat(el.value); if (!isNaN(v)) S[k] = v; }
-      saveSysSettings();
-      restartSysTimer();
-      toast("设置已保存", "ok");
-    });
-  });
-  $("resetBtn").onclick = () => {
-    S = Object.assign({}, sysDefaults);
-    saveSysSettings(); syncSysSettingsUI(); restartSysTimer();
-    toast("已恢复默认阈值", "ok");
-  };
-
-  // ---------- 格式化 ----------
-  function fmtB(n) {
-    if (n == null || isNaN(n)) return "--";
-    if (n >= GB) return (n / GB).toFixed(2) + " GB";
-    if (n >= MB) return Math.round(n / MB) + " MB";
-    return Math.round(n) + " B";
-  }
-  function fmtSmart(n) {
-    if (n == null || isNaN(n)) return "--";
-    if (n >= GB) return (n / GB).toFixed(2) + " GB";
-    return Math.round(n / MB) + " MB";
-  }
-  function fmtDur(sec) {
-    if (sec == null) return "--";
-    const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
-    if (d > 0) return d + " 天 " + h + " 时";
-    if (h > 0) return h + " 时 " + m + " 分";
-    return m + " 分";
-  }
-  function fmtClock(ms) {
-    const d = new Date(ms), p = (x) => String(x).padStart(2, "0");
-    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
-  }
-  function esc(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  }
-
-  // ---------- 声音 / 通知 / 标题闪烁 ----------
-  function ensureAudio() {
-    if (!S.sound || !audioUnlocked) return;
-    try {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === "suspended") audioCtx.resume();
-    } catch (e) {}
-  }
-  function alarmSound() {
-    ensureAudio();
-    if (!audioCtx) return;
-    const t0 = audioCtx.currentTime;
-    for (let i = 0; i < 3; i++) {
-      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.type = "sine";
-      o.frequency.setValueAtTime(880 + i * 60, t0 + i * 0.4);
-      g.gain.setValueAtTime(0.0001, t0 + i * 0.4);
-      g.gain.exponentialRampToValueAtTime(0.3, t0 + i * 0.4 + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.4 + 0.34);
-      o.connect(g); g.connect(audioCtx.destination);
-      o.start(t0 + i * 0.4); o.stop(t0 + i * 0.4 + 0.35);
-    }
-  }
-  function systemNotify(title, body) {
-    if (!S.notif || !("Notification" in window)) return;
-    try {
-      if (Notification.permission === "granted") new Notification(title, { body, tag: "portinspector-sysmon" });
-      else if (Notification.permission !== "denied") {
-        Notification.requestPermission().then((p) => {
-          if (p === "granted") new Notification(title, { body, tag: "portinspector-sysmon" });
-        }).catch(() => {});
-      }
-    } catch (e) {}
-  }
-  $("notifBtn").onclick = () => {
-    if (!("Notification" in window)) { toast("当前浏览器不支持系统通知", "err"); return; }
-    Notification.requestPermission().then((p) =>
-      toast(p === "granted" ? "系统通知已启用" : "通知权限被拒绝，仅保留页面内弹窗", p === "granted" ? "ok" : "err"));
-  };
-  function startTitleFlash() {
-    if (titleFlash) return;
-    let on = false;
-    titleFlash = setInterval(() => {
-      on = !on;
-      document.title = on ? "⚠ 内存告警 · PortInspector" : BASE_TITLE;
-    }, 900);
-  }
-  function stopTitleFlash() {
-    if (titleFlash) { clearInterval(titleFlash); titleFlash = null; }
-    document.title = BASE_TITLE;
-  }
-  ["pointerdown", "keydown"].forEach((ev) =>
-    window.addEventListener(ev, () => { audioUnlocked = true; ensureAudio(); }));
-
-  // ---------- 评估与预测 ----------
-  function predict() {
-    if (mHistory.length < 10) return null;
-    const pts = mHistory.slice(-20).filter((x) => x.ca > 0);
-    if (pts.length < 10) return null;
-    let sx = 0, sy = 0, sxx = 0, sxy = 0;
-    const t0 = pts[0].t;
-    for (const pt of pts) {
-      const x = (pt.t - t0) / 1000, y = pt.ca / GB;
-      sx += x; sy += y; sxx += x * x; sxy += x * y;
-    }
-    const k = pts.length, denom = k * sxx - sx * sx;
-    if (Math.abs(denom) < 1e-9) return null;
-    const a = (k * sxy - sx * sy) / denom;   // GB/秒
-    if (a >= -0.0001) return null;           // 未在下降
-    const lastY = pts[pts.length - 1].ca / GB;
-    const minLeft = lastY / (-a) / 60;
-    if (!isFinite(minLeft)) return null;
-    return { minLeft: Math.max(0, Math.round(minLeft)), gbPerMin: -a * 60 };
-  }
-  function sysEvaluate(m) {
-    const reasons = { warn: [], crit: [] };
-    const c = m.commit, p = m.physical;
-    const hasCommit = c.total > 0;
-    const availGb = c.avail / GB, physGb = p.avail / GB;
-    if (hasCommit) {
-      if (c.usedPct >= S.critCommitPct) reasons.crit.push("提交空间占用已达 " + c.usedPct + "%（>=" + S.critCommitPct + "%），已接近上限");
-      else if (c.usedPct >= S.warnCommitPct) reasons.warn.push("提交空间占用 " + c.usedPct + "%（>=" + S.warnCommitPct + "%）");
-      if (availGb <= S.critAvailGb) reasons.crit.push("提交空间剩余仅 " + fmtSmart(c.avail) + "（<" + S.critAvailGb + "GB），Windows 上任何进程申请内存都可能失败");
-      else if (availGb <= S.warnAvailGb) reasons.warn.push("提交空间剩余 " + fmtSmart(c.avail) + "（<" + S.warnAvailGb + "GB）");
-    }
-    if (physGb <= S.critPhysGb) reasons.crit.push("物理内存剩余仅 " + fmtSmart(p.avail) + "（<" + S.critPhysGb + "GB）");
-    else if (physGb <= S.warnPhysGb) reasons.warn.push("物理内存剩余 " + fmtSmart(p.avail) + "（<" + S.warnPhysGb + "GB）");
-    const pred = predict();
-    if (S.predict && pred) {
-      if (pred.minLeft <= S.predictCritMin) reasons.crit.push("按近 8 分钟下降趋势，提交空间约 " + pred.minLeft + " 分钟后耗尽");
-      else if (pred.minLeft <= S.predictWarnMin) reasons.warn.push("按趋势推算约 " + pred.minLeft + " 分钟后提交空间将耗尽");
-    }
-    return { level: reasons.crit.length ? "crit" : (reasons.warn.length ? "warn" : "ok"), warn: reasons.warn, crit: reasons.crit, pred };
-  }
-
-  // ---------- 报警 ----------
-  function fireAlarm(ev) {
-    const c = metrics && metrics.commit;
-    const big = ((metrics && metrics.top) || []).filter((x) => c && c.total > 0 && x.commit / c.total >= 0.05).slice(0, 3);
-    const reasons = (ev.crit && ev.crit.length) ? ev.crit : (ev.warn || []);
-    let html = "<p>系统即将/已经到达内存上限，继续放任可能复现「native 内存分配失败 → 应用崩溃」。</p>";
-    html += "<ul>" + reasons.map((r) => "<li>" + esc(r) + "</li>").join("") + "</ul>";
-    if (big.length) {
-      html += "<p>当前较大的内存占用进程：</p><ul>";
-      big.forEach((x) => html += "<li>" + esc(x.name || "未知进程") + " (PID " + x.pid + ") 提交 " + fmtB(x.commit) + "</li>");
-      html += "</ul>";
-    }
-    html += '<div class="tip">建议：立即保存工作 → 切换到「端口占用」页或任务管理器按“提交大小”排序找元凶（vmmem / Docker / 浏览器）→ 必要时重启电脑，并把虚拟内存改为“系统管理的大小”。</div>';
-    $("alertBody").innerHTML = html;
-    if (ev.level === "crit") $("alertTitle").textContent = "⚠ 严重告警：提交空间（页面文件）即将耗尽";
-    else { $("alertTitle").textContent = "⚠ 内存预警"; $("alertTitle").style.color = "var(--warn)"; }
-    if (S.popup) $("alertModal").classList.add("show");
-    activeCrit = true;
-    systemNotify("PortInspector " + (ev.level === "crit" ? "严重告警" : "预警"),
-      (reasons[0] || "内存指标异常") + (big.length ? " · 最大占用：" + big[0].name : ""));
-    if (S.sound) alarmSound();
-    startTitleFlash();
-  }
-  $("alertOk").onclick = () => {
-    $("alertModal").classList.remove("show");
-    snoozeUntil = Date.now() + S.snoozeMin * 60000;
-    activeCrit = false;
-    stopTitleFlash();
-    toast(S.snoozeMin > 0 ? "已静默 " + S.snoozeMin + " 分钟，超时后若仍异常会再次提醒" : "已关闭，异常持续将再次提醒", "ok");
-  };
-  $("alertModal").addEventListener("click", (e) => { if (e.target.id === "alertModal") $("alertOk").click(); });
-  $("testBtn").onclick = () => {
-    if (!metrics) { toast("暂无数据，请稍候再测试", "err"); return; }
-    fireAlarm({ level: "crit", crit: ["（测试）模拟严重告警：提交空间剩余 " + fmtSmart(metrics.commit.avail) + "，触发阈值报警链路"], warn: [] });
-  };
-
-  // ---------- 渲染 ----------
-  const TIP_OK = "请继续保持观察。若提交空间剩余持续低于 2GB，可在“报警设置”中调低阈值提前预警。";
-  const TIP_WARN = "建议查看下方“内存大户”，清理可释放的进程；若趋势继续下降请尽快保存工作。";
-  const TIP_CRIT = "此状态接近或已达“分配 1MB 都可能失败”的崩溃点（与 GitAskPassApp / JVM 崩溃日志一致）。建议立即保存并重启电脑，或先终止占内存的大户（vmmem / Docker / 浏览器）。";
-
-  function setStatus(lv, title, desc, hint) {
-    const badge = $("statusBadge"), banner = $("banner");
-    badge.className = "badge st-" + (lv === "crit" ? "crit" : lv === "warn" ? "warn" : lv);
-    banner.className = "st-" + lv;
-    $("badgeTxt").textContent = { ok: "状态正常", warn: "内存吃紧", crit: "内存告警", off: "连接中断" }[lv] || "状态正常";
-    $("bannerTitle").textContent = title;
-    $("bannerDesc").textContent = desc || "";
-    $("bannerHint").textContent = hint || "";
-    memLevel = lv;
-    $("tabSysmon").classList.toggle("alert", lv === "crit");
-  }
-
-  function renderAll() {
-    if (!metrics) return;
-    const c = metrics.commit, p = metrics.physical;
-    const hasCommit = c.total > 0;
-    const commitHot = hasCommit && c.usedPct >= S.critCommitPct;
-
-    $("cardCommit").classList.toggle("hot", commitHot);
-    $("st-commitPct").textContent = hasCommit ? c.usedPct + "%" : "--";
-    $("st-commitSub").textContent = hasCommit ? "已提交 " + fmtSmart(c.used) + " / 上限 " + fmtSmart(c.total) : "未检测到页面文件配置";
-    $("barCommit").style.width = (hasCommit ? Math.min(100, c.usedPct) : 0) + "%";
-    $("barCommit").style.background = commitHot ? "var(--danger)" : "";
-
-    $("st-physPct").textContent = p.usedPct + "%";
-    $("st-physSub").textContent = "可用 " + fmtSmart(p.avail) + " / 共 " + fmtB(p.total);
-    $("barPhys").style.width = Math.min(100, p.usedPct) + "%";
-
-    $("st-avail").textContent = hasCommit ? fmtSmart(c.avail) : "--";
-    $("cardAvail").classList.toggle("hot", hasCommit && c.avail <= S.critAvailGb * GB);
-    const pr = predict();
-    $("st-trend").textContent = pr
-      ? (pr.gbPerMin >= 0.01 ? "下降 " + pr.gbPerMin.toFixed(2) + " GB/分" : "缓慢下降")
-      : (mHistory.length < 10 ? "采集中…" : "走势平稳");
-    $("barAvail").style.width = (hasCommit ? Math.max(0, 100 - c.usedPct) : 0) + "%";
-    $("st-load").textContent = metrics.memoryLoad + "%";
-    $("st-uptime").textContent = fmtDur(metrics.uptimeSec);
-    $("st-boot").textContent = "更新于 " + fmtClock(metrics.ts);
-
-    $("gCommit").style.width = (hasCommit ? Math.min(100, c.usedPct) : 0) + "%";
-    $("gCommitVal").textContent = hasCommit ? c.usedPct + "%" : "--";
-    $("gPhys").style.width = Math.min(100, p.usedPct) + "%";
-    $("gPhysVal").textContent = p.usedPct + "%";
-    $("gLoad").style.width = Math.min(100, metrics.memoryLoad) + "%";
-    $("gLoadVal").textContent = metrics.memoryLoad + "%";
-    const gColor = (v, warnT, critT) => v >= critT ? "var(--danger)" : v >= warnT ? "var(--warn)" : "var(--ok)";
-    $("gCommit").style.background = gColor(hasCommit ? c.usedPct : 0, S.warnCommitPct, S.critCommitPct);
-    const physWarnPct = p.total > 0 ? 100 - S.warnPhysGb * GB / p.total * 100 : 85;
-    const physCritPct = p.total > 0 ? 100 - S.critPhysGb * GB / p.total * 100 : 95;
-    $("gPhys").style.background = gColor(p.usedPct, physWarnPct, physCritPct);
-
-    renderKV();
-    renderTop();
-  }
-
-  function renderKV() {
-    const m = metrics, c = m.commit, p = m.physical, v = m.virtual, os = m.os || {};
-    const rows = [
-      ["物理内存 总量", fmtB(p.total)],
-      ["物理内存 已用", fmtB(p.used) + "（" + p.usedPct + "%）"],
-      ["物理内存 可用", fmtB(p.avail), p.avail < S.warnPhysGb * GB],
-      ["", ""],
-      ["提交空间上限 Commit limit", fmtB(c.total)],
-      ["已提交 commit charge", fmtB(c.used)],
-      ["剩余可提交 AvailPageFile", fmtB(c.avail), c.total > 0 && c.avail <= S.critAvailGb * GB],
-      ["提交占用率", c.total > 0 ? c.usedPct + "%" : "--"],
-      ["", ""],
-      ["内存负载 Memory Load", m.memoryLoad + "%"],
-      ["虚拟内存(进程地址)可用", fmtB(v.avail)],
-      ["系统运行时长", fmtDur(m.uptimeSec)],
-      ["采集时刻", fmtClock(m.ts)],
-    ];
-    const osLine = [];
-    if (os.caption) osLine.push(esc(os.caption));
-    if (os.version) osLine.push(esc(os.version));
-    if (os.hypervisorPresent) osLine.push("Hyper-V/虚拟机监控已启用");
-    if (os.bootTime) osLine.push("启动于 " + esc(String(os.bootTime).replace("T", " ").slice(0, 19)));
-    if (osLine.length) rows.push(["", ""], ["系统", osLine.join(" · ")]);
-    let html = "";
-    for (const [k, val, warn] of rows) {
-      if (k === "" && val === "") { html += '<dd class="sep"></dd>'; continue; }
-      html += "<dt>" + esc(k) + "</dt><dd" + (warn ? ' class="big"' : "") + ">" + esc(val) + "</dd>";
-    }
-    $("kv").innerHTML = html;
-  }
-
-  function renderTop() {
-    const top = metrics && metrics.top;
-    if (!top || !top.length) {
-      $("topBody").innerHTML = "";
-      $("topEmpty").style.display = "block";
-      $("topEmpty").textContent = "暂无进程数据（PowerShell 被禁用或非 Windows）";
-      return;
-    }
-    const sig = JSON.stringify(top);
-    if (sig === topSig) return;   // 进程表每 15s 才变化，避免高频重绘
-    topSig = sig;
-    $("topEmpty").style.display = "none";
-    const total = (metrics.commit && metrics.commit.total) || 0;
-    let html = "";
-    top.slice(0, 20).forEach((x, i) => {
-      const share = total > 0 ? (x.commit / total * 100) : 0;
-      const lv = share >= 8 ? 2 : share >= 4 ? 1 : 0;
-      const name = x.name || "未知进程";
-      html += `<tr class="hot-lv${lv}">
-        <td class="rank">${i + 1}</td>
-        <td><div class="pname"><span class="icon">${esc(name[0] || "?")}</span>
-          <span class="nm" title="${esc(name)}">${esc(name)}</span>
-          <span class="pid">PID ${x.pid}</span></div></td>
-        <td class="mb">${fmtB(x.commit)}</td>
-        <td class="mb">${fmtB(x.peak)}</td>
-        <td class="mb">${fmtB(x.ws)}</td>
-        <td class="mb">${total > 0 ? share.toFixed(1) + "%" : "--"}</td></tr>`;
-    });
-    $("topBody").innerHTML = html;
-  }
-
-  // ---------- 趋势图 ----------
-  function drawChart() {
-    const cv = $("chart"), ctx = cv.getContext("2d");
-    const w = cv.clientWidth, h = cv.clientHeight;
-    if (!w || !h) return;                       // 页面在别的 Tab 时画布不可见
-    const dpr = window.devicePixelRatio || 1;
-    if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    if (mHistory.length < 2) {
-      ctx.fillStyle = "#8b93a7"; ctx.font = "12px sans-serif"; ctx.textAlign = "center";
-      ctx.fillText("采集中，稍候绘制趋势曲线…", w / 2, h / 2);
-      return;
-    }
-    const padL = 48, padR = 16, padT = 8, padB = 22;
-    const iw = w - padL - padR, ih = h - padT - padB;
-    const series = [mHistory.map((x) => ({ x: x.t, y: x.ca })), mHistory.map((x) => ({ x: x.t, y: x.pa }))];
-    let maxY = 0;
-    series.forEach((s) => s.forEach((pt) => { if (pt.y > maxY) maxY = pt.y; }));
-    const yMaxGb = Math.max(1, Math.ceil(maxY / GB * 1.15 * 10) / 10);
-    const t0 = mHistory[0].t, t1 = mHistory[mHistory.length - 1].t;
-    const X = (t) => padL + (t - t0) / Math.max(1, t1 - t0) * iw;
-    const Y = (v) => padT + ih - (v / GB) / yMaxGb * ih;
-
-    ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.fillStyle = "#8b93a7";
-    ctx.font = "10px 'Cascadia Mono', Consolas, monospace"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    for (let i = 0; i <= 4; i++) {
-      const gb = yMaxGb * i / 4, y = Y(gb * GB);
-      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
-      ctx.fillText(gb.toFixed(1), padL - 6, y);
-    }
-    ctx.textAlign = "center"; ctx.textBaseline = "top";
-    ctx.fillText(fmtClock(t0), padL, h - padB + 4);
-    ctx.fillText("现在 " + fmtClock(t1), w - padR, h - padB + 4);
-    if (S.critAvailGb > 0 && S.critAvailGb <= yMaxGb) {
-      const yc = Y(S.critAvailGb * GB);
-      ctx.strokeStyle = "rgba(255,93,108,0.55)"; ctx.setLineDash([5, 4]);
-      ctx.beginPath(); ctx.moveTo(padL, yc); ctx.lineTo(w - padR, yc); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "rgba(255,93,108,0.9)"; ctx.textAlign = "left";
-      ctx.fillText("严重线 " + S.critAvailGb + "GB", padL + 6, yc - 8);
-    }
-    const colors = ["#38d39f", "#9b6bff"];
-    series.forEach((s, si) => {
-      ctx.strokeStyle = colors[si]; ctx.lineWidth = 1.8; ctx.lineJoin = "round";
-      ctx.beginPath();
-      s.forEach((pt, i) => { const x = X(pt.x), y = Y(pt.y); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
-      ctx.stroke();
-    });
-  }
-  window.addEventListener("resize", () => { if (curView === "sysmon") requestAnimationFrame(drawChart); });
-
-  // ---------- 轮询 ----------
-  async function sysTick() {
-    const now = Date.now();
-    try {
-      const res = await fetch("/api/stats", { cache: "no-store" });
-      const d = await res.json();
-      sysFail = 0;
-      if (lastTick && now - lastTick > 45000) mHistory = [];   // 断流恢复，丢弃旧趋势
-      lastTick = now;
-      if (!d.ok) {
-        setStatus("off", "数据源不可用", d.reason || "采集失败", "仅支持 Windows 环境。");
-        return;
-      }
-      metrics = d;
-      mHistory.push({ t: now, ca: d.commit.avail, pa: d.physical.avail });
-      if (mHistory.length > MAX_POINTS) mHistory.shift();
-      const ev = sysEvaluate(d);
-      renderAll();
-      if (curView === "sysmon") drawChart();
-      applyLevel(ev);
-    } catch (e) {
-      sysFail++;
-      if (sysFail >= 2) {
-        setStatus("off", "与监控服务连接中断", "请确认服务端仍在运行；恢复后本页会自动重连。", "");
-        stopTitleFlash();
-      }
-    }
-  }
-
-  function applyLevel(ev) {
-    const isCrit = ev.level === "crit", isWarn = ev.level === "warn";
-    const now = Date.now();
-    const reasonTop = ev.crit[0] || ev.warn[0] || "";
-    if (isCrit) {
-      setStatus("crit", "严重：提交空间（页面文件）即将耗尽，可能复现进程崩溃", reasonTop || "内存异常，请尽快处理", TIP_CRIT);
-      if (!activeCrit && now >= snoozeUntil) { activeCrit = true; fireAlarm(ev); }
-      else if (now < snoozeUntil) startTitleFlash();
-    } else if (isWarn) {
-      setStatus("warn", "内存吃紧，请留意提交空间剩余", reasonTop || "", TIP_WARN);
-      activeCrit = false;
-      stopTitleFlash();
-      if (ev.warn.length && prevLevel !== "warn") toast("预警：" + ev.warn[0], "warn");
-    } else {
-      setStatus("ok", "系统内存状态正常", buildOkDesc(), TIP_OK);
-      activeCrit = false;
-      stopTitleFlash();
-    }
-    prevLevel = memLevel;
-  }
-  function buildOkDesc() {
-    const c = metrics.commit;
-    if (!c || c.total <= 0) return "提交空间数据不可用";
-    return "提交空间剩余 " + fmtSmart(c.avail) + "，占用 " + c.usedPct + "%；物理内存剩余 " + fmtSmart(metrics.physical.avail) + "。";
-  }
-  function restartSysTimer() {
-    if (sysTimer) clearInterval(sysTimer);
-    sysTimer = setInterval(sysTick, Math.max(1, S.refreshSec) * 1000);
-  }
-
-  // ===================== 系统服务 =====================
-  let svcAll = [];
-  let svcState = "ALL";
-  let svcMode = "ALL";
-  let svcTimer = null;
-  let svcPending = null;    // {name, display, act, mode}
-  let svcAdmin = false;
-  let svcLoaded = false;
-
-  async function fetchServices(force) {
-    const btn = $("svcRefreshBtn");
-    btn.innerHTML = '<span class="spin"></span> 刷新中';
-    try {
-      const res = await fetch("/api/services" + (force ? "?force=1" : ""), { cache: "no-store" });
-      const d = await res.json();
-      svcAll = d.services || [];
-      svcAdmin = !!d.admin;
-      svcLoaded = true;
-      $("svcAdminHint").textContent = svcAdmin
-        ? "已以管理员身份运行，可启动 / 停止服务。"
-        : "未以管理员身份运行：启停与修改启动类型可能被系统拒绝（Access denied）。";
-      $("svcBadge").className = "badge " + (d.ok === false || !svcAdmin ? "st-warn" : "st-ok");
-      $("svcBadgeTxt").textContent = d.ok === false ? "获取失败"
-        : (svcAdmin ? "管理员模式" : "受限模式");
-      renderServices();
-      if (d.ok === false) toast("获取服务列表失败：" + (d.error || "未知原因"), false);
-    } catch (e) {
-      toast("获取服务列表失败：" + e.message, false);
-    } finally {
-      btn.textContent = "刷新";
-    }
-  }
-
-  function modeTag(mode) {
-    const map = { Auto: ["mode-auto", "自动"], Manual: ["mode-manual", "手动"], Disabled: ["mode-disabled", "禁用"] };
-    const it = map[mode];
-    return it ? '<span class="tag ' + it[0] + '">' + it[1] + '</span>'
-              : '<span class="tag stopped">' + esc(mode || "未知") + '</span>';
-  }
-  function modeSelect(s) {
-    const map = { Auto: "Automatic", Manual: "Manual", Disabled: "Disabled" };
-    const cur = map[s.mode] || "";
-    let html = '<select class="svcsel" data-name="' + esc(s.name) + '" data-display="' + esc(s.display) +
-               '" data-old="' + cur + '"' + (s.protected ? " disabled" : "") + ">";
-    if (!cur) html += '<option value="">' + esc(s.mode || "未知") + "</option>";
-    [["Automatic", "自动"], ["Manual", "手动"], ["Disabled", "禁用"]].forEach(([v, t]) => {
-      html += '<option value="' + v + '"' + (v === cur ? " selected" : "") + ">" + t + "</option>";
-    });
-    return html + "</select>";
-  }
-
-  function renderServices() {
-    const q = ($("svcSearch").value || "").trim().toLowerCase();
-    const rows = svcAll.filter((s) => {
-      if (svcState !== "ALL" && s.state !== svcState) return false;
-      if (svcMode !== "ALL" && s.mode !== svcMode) return false;
-      if (!q) return true;
-      return (s.display + " " + s.name).toLowerCase().includes(q);
-    });
-
-    const running = svcAll.filter((s) => s.state === "Running").length;
-    $("sv-total").textContent = svcAll.length;
-    $("sv-running").textContent = running;
-    $("sv-stopped").textContent = svcAll.length - running;
-    $("sv-auto").textContent = svcAll.filter((s) => s.mode === "Auto").length;
-
-    const tbody = $("svcBody");
-    tbody.innerHTML = "";
-    $("svcEmpty").style.display = rows.length ? "none" : "block";
-    if (!rows.length) $("svcEmpty").textContent = svcLoaded ? "没有匹配的服务" : "正在加载服务列表…";
-
-    for (const s of rows) {
-      const isRun = s.state === "Running";
-      const tr = document.createElement("tr");
-      tr.innerHTML =
-        '<td><div class="svcname"><span class="d" title="' + esc(s.display) + '">' + esc(s.display) + '</span>' +
-          '<span class="n">' + esc(s.name) +
-            (s.protected ? ' · <b style="color:var(--warn)">受保护</b>' : "") + '</span></div></td>' +
-        '<td>' + (isRun ? '<span class="tag run">运行中</span>' : '<span class="tag stopped">已停止</span>') + '</td>' +
-        '<td>' + modeTag(s.mode) + '</td>' +
-        '<td class="pid">' + (s.pid || "—") + '</td>' +
-        '<td style="text-align:right;white-space:nowrap">' +
-          '<button class="svcbtn start" data-act="start" data-name="' + esc(s.name) + '" data-display="' + esc(s.display) + '"' +
-            (isRun || s.protected ? " disabled" : "") + '>启动</button> ' +
-          '<button class="svcbtn stop" data-act="stop" data-name="' + esc(s.name) + '" data-display="' + esc(s.display) + '"' +
-            (!isRun || s.protected ? " disabled" : "") + '>停止</button> ' +
-          modeSelect(s) +
-        '</td>';
-      tbody.appendChild(tr);
-    }
-  }
-
-  $("svcBody").addEventListener("click", (e) => {
-    const b = e.target.closest(".svcbtn");
-    if (!b || b.disabled) return;
-    openSvcConfirm(b.dataset.name, b.dataset.display, b.dataset.act, "");
-  });
-  $("svcBody").addEventListener("change", (e) => {
-    const sel = e.target.closest(".svcsel");
-    if (!sel || sel.disabled) return;
-    sel.dataset.pending = sel.value;
-    openSvcConfirm(sel.dataset.name, sel.dataset.display, "mode", sel.value);
-  });
-
-  function openSvcConfirm(name, display, act, mode) {
-    svcPending = { name, display, act, mode };
-    const modeTxt = { Automatic: "自动", Manual: "手动", Disabled: "禁用" }[mode] || mode;
-    const actTxt = act === "start" ? "启动" : act === "stop" ? "停止"
-      : act === "restart" ? "重启" : "将启动类型改为「" + modeTxt + "」";
-    $("svcModalTitle").textContent = "确认" + actTxt + "？";
-    let extra = "";
-    if (act === "stop") extra = '<p class="warnbox">停止服务可能导致依赖它的功能不可用，请确认无其它服务依赖它。</p>';
-    if (act === "mode" && mode === "Disabled") extra = '<p class="warnbox">禁用后该服务不会随系统启动（当前已运行的实例不受影响）。</p>';
-    if (!svcAdmin) extra += '<p class="warnbox">当前未以管理员身份运行，操作可能被系统拒绝。</p>';
-    $("svcModalBody").innerHTML =
-      '<p>服务：<span class="hl">' + esc(display || name) + '</span></p>' +
-      '<p>名称：<span class="hl">' + esc(name) + '</span></p>' + extra;
-    $("svcModal").classList.add("show");
-  }
-  function restoreSelect() {
-    const sel = document.querySelector("#svcBody .svcsel[data-pending]");
-    if (sel) { sel.value = sel.dataset.old || ""; delete sel.dataset.pending; }
-  }
-  function closeSvcModal() { $("svcModal").classList.remove("show"); svcPending = null; }
-
-  $("svcModalCancel").onclick = () => { restoreSelect(); closeSvcModal(); };
-  $("svcModal").addEventListener("click", (e) => {
-    if (e.target.id === "svcModal") { restoreSelect(); closeSvcModal(); }
-  });
-  $("svcModalOk").onclick = async () => {
-    const task = svcPending;
-    if (!task) return;
-    closeSvcModal();
-    const doneTxt = task.act === "mode" ? "已更新启动类型：" : task.act === "start" ? "已启动：" : "已停止：";
-    try {
-      const res = await fetch("/api/service", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: task.name, action: task.act, mode: task.mode }),
-      });
-      const d = await res.json();
-      if (d.success) {
-        toast(doneTxt + task.name, true);
-        setTimeout(() => fetchServices(true), 700);
-      } else {
-        toast("操作失败：" + (d.error || "未知错误"), false);
-        fetchServices(true);
-      }
-    } catch (e) {
-      toast("请求失败：" + e.message, false);
-    }
-  };
-
-  $("svcRefreshBtn").onclick = () => fetchServices(true);
-  $("svcSearch").addEventListener("input", renderServices);
-  $("svcStateSeg").addEventListener("click", (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    [...$("svcStateSeg").children].forEach((x) => x.classList.remove("active"));
-    b.classList.add("active"); svcState = b.dataset.state; renderServices();
-  });
-  $("svcModeSeg").addEventListener("click", (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    [...$("svcModeSeg").children].forEach((x) => x.classList.remove("active"));
-    b.classList.add("active"); svcMode = b.dataset.mode; renderServices();
-  });
-  $("svcAutoRefresh").addEventListener("change", (e) => {
-    if (e.target.checked) {
-      svcTimer = setInterval(() => { if (curView === "services") fetchServices(); }, 10000);
-      fetchServices();
-    } else { clearInterval(svcTimer); svcTimer = null; }
-  });
-
-  // ===================== 磁盘清理 =====================
-  let disks = [];
-  let disksLoaded = false;
-  let cleanItems = [];
-  let cleanSel = new Set();
-  let bigFiles = [];
-  let bigSel = new Set();
-  let diskConfirm = null;
-
-  function openDiskConfirm(title, bodyHtml, onOk) {
-    diskConfirm = onOk;
-    $("diskModalTitle").textContent = title;
-    $("diskModalBody").innerHTML = bodyHtml;
-    $("diskModal").classList.add("show");
-  }
-  function closeDiskConfirm() { $("diskModal").classList.remove("show"); diskConfirm = null; }
-  $("diskModalOk").onclick = () => { const fn = diskConfirm; closeDiskConfirm(); if (fn) fn(); };
-  $("diskModalCancel").onclick = closeDiskConfirm;
-  $("diskModal").addEventListener("click", (e) => { if (e.target.id === "diskModal") closeDiskConfirm(); });
-
-  async function fetchDisks() {
-    try {
-      const d = await (await fetch("/api/disks", { cache: "no-store" })).json();
-      disks = d.disks || [];
-      disksLoaded = true;
-      $("diskBadge").className = "badge " + (d.ok === false ? "st-warn" : "st-ok");
-      $("diskBadgeTxt").textContent = d.ok === false ? "获取失败" : disks.length + " 个分区";
-      renderDisks();
-      if (d.ok === false) toast("获取磁盘信息失败：" + (d.error || "未知原因"), false);
-    } catch (e) {
-      toast("获取磁盘信息失败：" + e.message, false);
-    }
-  }
-
-  function renderDisks() {
-    const g = $("diskGrid");
-    g.innerHTML = "";
-    for (const d of disks) {
-      const ready = d.ready !== false;
-      const pct = d.usedPct;
-      const color = !ready ? "var(--muted)"
-        : pct >= 90 ? "var(--danger)" : pct >= 75 ? "var(--warn)" : "var(--ok)";
-      const card = document.createElement("div");
-      card.className = "disk";
-      card.innerHTML =
-        '<div class="dh"><div class="dl"' + (ready ? '' : ' style="opacity:.55"') + '>' +
-            esc(d.drive.replace("\\", "")) + '</div>' +
-          '<div style="min-width:0"><div class="dt">' + esc(d.label || d.drive) + '</div>' +
-          '<div class="ds">' + esc(d.type) + ' · ' + esc(d.fs || (ready ? "—" : "未就绪")) + '</div></div>' +
-          '<div class="dp" style="color:' + color + '">' + (ready ? pct + "%" : "—") + '</div></div>' +
-        '<div class="dbar"><i style="width:' + (ready ? Math.min(100, pct) : 0) +
-            '%;background:' + color + '"></i></div>' +
-        '<div class="dn">' + (ready
-          ? '<span>已用 ' + fmtB(d.used) + '</span><span>可用 ' + fmtB(d.free) + ' / ' + fmtB(d.total) + '</span>'
-          : '<span>无介质 / 不可访问</span><span>—</span>') + '</div>';
-      g.appendChild(card);
-    }
-  }
-
-  async function scanClean() {
-    const btn = $("cleanScanBtn");
-    btn.innerHTML = '<span class="spin"></span> 扫描中';
-    btn.disabled = true;
-    try {
-      const r = await fetch("/api/clean_scan", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
-      });
-      const d = await r.json();
-      cleanItems = d.items || [];
-      cleanSel = new Set(cleanItems.filter((x) => x.recommended && x.size > 0).map((x) => x.id));
-      renderClean();
-      if (d.truncated) toast("扫描超时，部分目录未统计完整", "warn");
-    } catch (e) {
-      toast("扫描失败：" + e.message, false);
-    } finally {
-      btn.textContent = "扫描可清理项";
-      btn.disabled = false;
-    }
-  }
-
-  function renderClean() {
-    const tb = $("cleanBody");
-    tb.innerHTML = "";
-    $("cleanEmpty").style.display = cleanItems.length ? "none" : "block";
-    let total = 0;
-    for (const it of cleanItems) {
-      if (cleanSel.has(it.id)) total += it.size;
-      const tr = document.createElement("tr");
-      tr.innerHTML =
-        '<td><input type="checkbox" class="chk" data-id="' + esc(it.id) + '"' +
-          (cleanSel.has(it.id) ? " checked" : "") + (it.size ? "" : " disabled") + '></td>' +
-        '<td>' + esc(it.name) +
-          (it.exists ? "" : ' <span style="color:var(--muted);font-size:11px">（不存在）</span>') + '</td>' +
-        '<td><span class="fpath" title="' + esc(it.path) + '">' + esc(it.path) + '</span></td>' +
-        '<td class="mb">' + fmtB(it.size) + '</td>' +
-        '<td class="mb">' + (it.files || "—") + '</td>';
-      tb.appendChild(tr);
-    }
-    $("cleanSummary").textContent = cleanItems.length
-      ? "共 " + cleanItems.length + " 类 · 已选 " + fmtB(total) : "尚未扫描";
-    $("cleanRunBtn").disabled = !(cleanSel.size && total > 0);
-  }
-
-  $("cleanBody").addEventListener("change", (e) => {
-    const c = e.target.closest(".chk");
-    if (!c) return;
-    if (c.checked) cleanSel.add(c.dataset.id); else cleanSel.delete(c.dataset.id);
-    renderClean();
-  });
-  $("cleanScanBtn").onclick = scanClean;
-  $("cleanRunBtn").onclick = () => {
-    const picked = cleanItems.filter((x) => cleanSel.has(x.id));
-    if (!picked.length) return;
-    const total = picked.reduce((s, x) => s + x.size, 0);
-    openDiskConfirm("确认清理选中项？",
-      "<p>将永久删除以下类别中的文件（不进回收站）：</p><ul>" +
-      picked.map((x) => "<li>" + esc(x.name) + " · " + fmtB(x.size) + "</li>").join("") + "</ul>" +
-      "<p>预计释放 <b>" + fmtB(total) + "</b>。被程序占用的文件会被跳过。</p>" +
-      '<p class="warnbox">删除后不可恢复，请确认没有程序正在使用这些文件。</p>',
-      runClean);
-  };
-
-  async function runClean() {
-    const ids = [...cleanSel];
-    toast("清理中，请稍候…", "ok");
-    try {
-      const r = await fetch("/api/clean", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids }),
-      });
-      const d = await r.json();
-      if (d.removed) toast("已删除 " + d.removed + " 个文件，释放 " + fmtB(d.freed) +
-        (d.failed ? "，跳过 " + d.failed + " 个（占用/无权限）" : ""), true);
-      else toast("没有文件被删除" + (d.failed ? "（" + d.failed + " 个被占用或无权限）" : ""), "warn");
-      cleanSel = new Set();
-      await scanClean();
-      fetchDisks();
-    } catch (e) {
-      toast("清理失败：" + e.message, false);
-    }
-  }
-
-  async function scanBig() {
-    const path = ($("bigPath").value || "").trim();
-    if (!path) { toast("请输入扫描路径", false); return; }
-    const btn = $("bigScanBtn");
-    btn.innerHTML = '<span class="spin"></span> 扫描中';
-    btn.disabled = true;
-    try {
-      const r = await fetch("/api/bigfiles", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: path, min_mb: Number($("bigMin").value) || 100, limit: 50 }),
-      });
-      const d = await r.json();
-      bigFiles = d.files || [];
-      bigSel = new Set();
-      renderBig();
-      $("bigSummary").textContent = d.error ? d.error
-        : "扫描 " + (d.scanned || 0) + " 个文件，命中 " + bigFiles.length + " 个" +
-          (d.truncated ? "（已超时截断）" : "");
-      if (d.error) toast(d.error, false);
-    } catch (e) {
-      toast("扫描失败：" + e.message, false);
-    } finally {
-      btn.textContent = "扫描大文件";
-      btn.disabled = false;
-    }
-  }
-
-  function renderBig() {
-    const tb = $("bigBody");
-    tb.innerHTML = "";
-    $("bigEmpty").style.display = bigFiles.length ? "none" : "block";
-    let total = 0;
-    for (const f of bigFiles) {
-      if (bigSel.has(f.path)) total += f.size;
-      const tr = document.createElement("tr");
-      tr.innerHTML =
-        '<td><input type="checkbox" class="chk" data-p="' + esc(f.path) + '"' +
-          (bigSel.has(f.path) ? " checked" : "") + '></td>' +
-        '<td><span class="fpath" title="' + esc(f.path) + '">' + esc(f.path) + '</span></td>' +
-        '<td class="mb">' + fmtB(f.size) + '</td>' +
-        '<td class="mb">' + esc(fmtClock(f.mtime * 1000)) + '</td>';
-      tb.appendChild(tr);
-    }
-    $("bigDelBtn").disabled = !bigSel.size;
-    if (bigSel.size) $("bigSummary").textContent = "已选 " + bigSel.size + " 个文件 · " + fmtB(total);
-  }
-
-  $("bigBody").addEventListener("change", (e) => {
-    const c = e.target.closest(".chk");
-    if (!c) return;
-    if (c.checked) bigSel.add(c.dataset.p); else bigSel.delete(c.dataset.p);
-    renderBig();
-  });
-  $("bigScanBtn").onclick = scanBig;
-  $("bigDelBtn").onclick = () => {
-    const paths = [...bigSel];
-    if (!paths.length) return;
-    const total = bigFiles.filter((f) => bigSel.has(f.path)).reduce((s, f) => s + f.size, 0);
-    openDiskConfirm("确认删除选中的 " + paths.length + " 个文件？",
-      "<p>将永久删除以下文件（不进回收站）：</p><ul>" +
-      paths.slice(0, 8).map((p) => "<li>" + esc(p) + "</li>").join("") +
-      (paths.length > 8 ? "<li>…等共 " + paths.length + " 个</li>" : "") + "</ul>" +
-      "<p>预计释放 <b>" + fmtB(total) + "</b>。</p>" +
-      '<p class="warnbox">删除后不可恢复；系统目录下的文件会被服务端拒绝。</p>',
-      () => runDeleteBig(paths));
-  };
-
-  async function runDeleteBig(paths) {
-    try {
-      const r = await fetch("/api/delete_paths", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths: paths }),
-      });
-      const d = await r.json();
-      if (d.removed) toast("已删除 " + d.removed + " 个文件，释放 " + fmtB(d.freed) +
-        (d.failed ? "，失败/拒绝 " + d.failed + " 个" : ""), true);
-      else toast("没有文件被删除" + (d.failed ? "（" + d.failed + " 个失败，可能无权限或受保护）" : ""), "warn");
-      bigSel = new Set();
-      await scanBig();
-      fetchDisks();
-    } catch (e) {
-      toast("删除失败：" + e.message, false);
-    }
-  }
-
-  // ===================== Tab 切换 =====================
-  let curView = "ports";
-  function switchView(v) {
-    curView = v;
-    document.querySelectorAll("#tabs .tab").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
-    $("view-ports").hidden = v !== "ports";
-    $("view-sysmon").hidden = v !== "sysmon";
-    $("view-services").hidden = v !== "services";
-    $("view-disks").hidden = v !== "disks";
-    if (v === "ports") fetchPorts();
-    else if (v === "services") { if (!svcLoaded) fetchServices(); }
-    else if (v === "disks") { if (!disksLoaded) fetchDisks(); }
-    else { requestAnimationFrame(drawChart); if (!metrics) sysTick(); }
-  }
-  $("tabs").addEventListener("click", (e) => {
-    const b = e.target.closest(".tab");
-    if (b) switchView(b.dataset.view);
-  });
-
-  // ===================== 启动 =====================
-  syncSysSettingsUI();
-  restartSysTimer();
-  sysTick();
-  fetchPorts();
-</script>
+  <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

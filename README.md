@@ -1,8 +1,8 @@
-# Port Inspector · 本地系统工具箱
+# OneKit · 本地系统工具箱
 
-> 一个零依赖的本地运维小工具，四个 Tab 一站式：**端口占用查看与进程终止**、**Windows 服务启停**、**系统内存（提交空间）监控报警**、**磁盘容量监控与垃圾清理**。双击即用，玻璃拟态深色 UI，所有危险操作全程二次确认。
+> 一个零依赖的本地运维小工具，十个 Tab 一站式：**端口占用查看与进程终止**、**Windows 服务启停**、**系统内存（提交空间）监控报警**、**磁盘容量监控与垃圾清理**、**本地代码/文本搜索**、**JWT 解密**、**JSON 格式化**、**时间戳转换**、**Base64 编解码**、**UTF-8 转义**。双击即用，玻璃拟态深色 UI，所有危险操作全程二次确认。
 
-[![Release](https://img.shields.io/github/v/release/yujiaao/port-occupancy-manager)](https://github.com/yujiaao/port-occupancy-manager/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/github/v/release/yujiaao/onekit)](https://github.com/yujiaao/onekit/releases/tag/v1.0.0)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)](https://www.microsoft.com/windows)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -50,14 +50,57 @@
 - **大文件查找**：指定路径 + 最小体积，扫描出占用最大的 Top 50 文件（只读扫描），可勾选后删除
 - 清理为**永久删除**（不进回收站），全程二次确认，被占用的文件自动跳过
 
+### Tab 5 · 代码搜索
+
+- **目录内全文搜索**：输入目录与关键词，递归检索文本文件内容，支持「普通文本」与「正则」两种模式，可勾选「仅按文件名」「区分大小写」「包含子目录」及按后缀过滤（`py,js`）
+- **自动跳过**：`.git` / `.svn` / `.hg` / `.idea` 等**版本管理与构建目录**，以及**压缩包**（zip/rar/7z/tar/gz…）与**二进制文件**（可执行、图片、音视频、Office…），靠扩展名 + NUL 字节嗅探双重判定，避免无意义读盘与乱码
+- **结果分组**：命中的文本文件按 **代码 / 配置文件 / 其他文本** 自动分类（按扩展名与文件名识别，如 `.py`=代码、`.ini/.toml`=配置、`README`=其他），点击展开查看匹配行并高亮关键词
+- **最近查询目录**：每次搜索自动记录目录，持久化到本地 JSON（exe 同目录 / 用户主目录 / 临时目录依次回退），下次打开页面时作为目录输入框的下拉建议
+- **安全只读**：仅读取与展示，不修改、不删除任何文件；受可调超时（默认 600 秒，页面可改）与结果数上限保护，大目录不会卡死
+
+### Tab 6 · JWT 解密
+
+- **纯前端解码**：粘贴 JWT（三段用 `.` 分隔），自动 base64url 解码并格式化展示 **Header / Payload**，全程在浏览器内完成，**token 不上传任何服务器**
+- **时间声明可视化**：对 `exp` / `iat` / `nbf` 显示可读时间，并给出「已过期 / 尚未生效 / 有效」状态；`sub` / `iss` / `aud` 等也单独列出
+- **本地签名校验**：可选填入密钥做验签 —— `HS*` 填密钥文本（HMAC，恒定时间比较），`RS*`/`ES*`/`PS*` 贴 PEM 公钥（`BEGIN PUBLIC KEY`，走 Web Crypto 验签）；`alg=none` 给出未签名风险提醒
+- **一键复制**：Header / Payload 各带复制按钮
+
+### Tab 7 · JSON 格式化
+
+- **纯前端处理**：粘贴 JSON 文本，一键「格式化 / 压缩 / 校验」，全程在本地浏览器完成，不上传
+- **格式化选项**：缩进可选 2 空格 / 4 空格 / Tab，并支持「排序键」按字典序递归排序（数组顺序不变）
+- **错误定位**：解析失败时定位到「第 X 行第 Y 列附近」，并展示原始报错信息，方便快速修正
+- **粘贴 / 复制 / 下载**：可从剪贴板读取输入，复制美化结果，或下载为 `formatted.json`
+
+### Tab 8 · 时间戳转换
+
+- **纯前端互转**：时间戳（秒 / 毫秒）与日期双向转换，全部在本地浏览器完成
+- **时间戳 → 日期**：自动识别秒 / 毫秒（也可手动指定），输出本地时间、UTC、ISO 8601、日期 / 时间、星期、相对现在（如“3 小时前 / 未来 2 天后），并给出对应秒、毫秒时间戳；支持「现在」一键填入当前时间戳
+- **日期 → 时间戳**：输入日期串（如 `2023-11-15 12:00:00` 或 ISO），输出秒、毫秒与解析后的 ISO；空格当作 `T` 容错
+- **一键复制**：每一行结果均可单独复制
+
+### Tab 9 · Base64 编解码
+
+- **纯前端互转**：文本 ↔ Base64，全程在本地浏览器完成，不上传
+- **编码/解码切换**：支持「编码（文本→Base64）」与「解码（Base64→文本）」，输入即转换
+- **标准 / URL 安全**：可选标准 Base64（`+` `/` `=`）或 Base64URL（`-` `_` 无填充）；解码时自动兼容 URL 安全字符并补齐 padding
+- **辅助操作**：复制结果、交换输入输出（解码结果直接回填再反转方向）、清空；非法 Base64 会给出明确报错
+
+### Tab 10 · UTF-8 转义
+
+- **纯前端互转**：文本与转义序列互转，全程在本地浏览器完成，不上传
+- **两种格式**：`\uXXXX`（Unicode 转义，可打印 ASCII 保持原样，非 ASCII 按码点转义并支持代理对 / `\u{...}`）与 `\xHH`（UTF-8 字节转义，逐字节）
+- **编码 / 解码切换**：输入即转换；解码时非法 `\u` / `\xHH` 会给出明确报错
+- **辅助操作**：复制结果、交换输入输出、清空
+
 ### 通用
 
-- **双击即用**：打包成单文件 `PortInspector.exe`，运行即自动打开浏览器
+- **双击即用**：打包成单文件 `OneKit.exe`，运行即自动打开浏览器
 - **跨 Tab 报警**：在端口页、服务页或磁盘页时，内存监控仍在后台轮询，异常时内存 Tab 亮红点并照常弹窗
 
 ## 界面预览
 
-![Port Inspector 界面预览（端口占用页面）](preview.svg)
+![OneKit 界面预览（端口占用页面）](preview.svg)
 
 > 预览图为早期版本（端口占用页面）。新增的「系统内存监控」「系统服务」两个 Tab 风格与之一致。
 
@@ -65,16 +108,16 @@
 
 ### 方式一：下载 exe（推荐，零安装）
 
-1. 下载 `PortInspector.exe`
-   - 仓库文件页：<https://github.com/yujiaao/port-occupancy-manager/blob/main/dist/PortInspector.exe>
-   - 或直接下载：<https://raw.githubusercontent.com/yujiaao/port-occupancy-manager/main/dist/PortInspector.exe>
+1. 下载 `OneKit.exe`
+   - 仓库文件页：<https://github.com/yujiaao/onekit/blob/main/dist/OneKit.exe>
+   - 或直接下载：<https://raw.githubusercontent.com/yujiaao/onekit/main/dist/OneKit.exe>
 2. 双击运行，浏览器自动打开 <http://127.0.0.1:8765>
 
 可选命令行参数：
 
 ```bash
-PortInspector.exe 9000          # 指定监听端口
-PortInspector.exe --no-browser  # 不自动打开浏览器
+OneKit.exe 9000          # 指定监听端口
+OneKit.exe --no-browser  # 不自动打开浏览器
 ```
 
 > **要用「系统服务」启停功能时，请右键以管理员身份运行**；非管理员也能查看列表，但启停会被系统拒绝（Access denied）。
@@ -82,8 +125,8 @@ PortInspector.exe --no-browser  # 不自动打开浏览器
 ### 方式二：从源码运行（需 Python 3.8+）
 
 ```bash
-git clone https://github.com/yujiaao/port-occupancy-manager.git
-cd port-occupancy-manager
+git clone https://github.com/yujiaao/onekit.git
+cd onekit
 python server.py
 # 浏览器打开 http://127.0.0.1:8765
 ```
@@ -92,7 +135,7 @@ python server.py
 
 ```bash
 pip install pyinstaller
-pyinstaller PortInspector.spec --noconfirm   # 产物： dist/PortInspector.exe
+pyinstaller OneKit.spec --noconfirm   # 产物： dist/OneKit.exe
 ```
 
 ## 使用说明
@@ -167,16 +210,33 @@ pyinstaller PortInspector.spec --noconfirm   # 产物： dist/PortInspector.exe
 | POST | `/api/clean` | 清理指定类别（90 秒预算，被占用文件跳过） |
 | POST | `/api/bigfiles` | 大文件扫描 Top N（只读，25 秒预算） |
 | POST | `/api/delete_paths` | 删除指定文件（受保护目录拒绝） |
+| POST | `/api/search` | 目录全文搜索：跳过 VCS/压缩包/二进制，按 代码/配置/其他 分组，自动记录目录到历史 |
+| GET | `/api/search/history` | 返回最近查询的目录列表 |
 
 ## 项目结构
 
 ```
-port-inspector/
-├── server.py              # 后端：端口查询 / 进程终止 / 系统服务 / 内存采集 API
-├── index.html             # 前端：三个 Tab 的玻璃拟态深色 UI（单文件）
-├── PortInspector.spec     # PyInstaller 打包配置
+onekit/
+├── server.py              # 后端：端口查询 / 进程终止 / 系统服务 / 内存采集 API（同时托管 static/）
+├── index.html             # 前端入口：Tab 结构 + 弹窗，样式与脚本外链到 static/
+├── static/
+│   ├── styles.css         # 全部样式（玻璃拟态深色主题）
+│   └── js/
+│       ├── common.js      # 共享工具：$ / toast / 格式化 / 全局视图状态
+│       ├── app.js         # 入口：Tab 切换、视图懒加载
+│       ├── ports.js       # 端口占用 Tab
+│       ├── sysmon.js      # 系统内存监控 Tab
+│       ├── services.js    # 系统服务 Tab
+│       ├── disks.js       # 磁盘清理 Tab
+│       ├── search.js      # 代码搜索 Tab
+│       ├── jwt.js         # JWT 解密 Tab（纯前端解码 + 验签）
+│       ├── jsonfmt.js     # JSON 格式化 Tab（纯前端格式化 / 压缩 / 校验）
+│       ├── tsconv.js       # 时间戳转换 Tab（纯前端时间戳 ↔ 日期）
+│       ├── b64.js          # Base64 编解码 Tab（纯前端文本 ↔ Base64）
+│       └── utf8.js         # UTF-8 转义 Tab（纯前端文本 ↔ \uXXXX / \xHH）
+├── OneKit.spec            # PyInstaller 打包配置（含 static/）
 ├── dist/
-│   └── PortInspector.exe  # 单文件可执行（双击即用）
+│   └── OneKit.exe         # 单文件可执行（双击即用）
 ├── preview.svg            # 界面预览图
 ├── LICENSE
 └── README.md

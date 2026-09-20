@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Port Inspector — 端口占用查看 / 进程终止 / 系统内存监控（零依赖，仅用标准库）。
+"""OneKit — 本地开发运维工具箱：端口占用查看 / 进程终止 / 系统内存监控（零依赖，仅用标准库）。
 
 页面顶部两个 Tab：
   1) 端口占用  —— 查看本机端口占用并按 PID / 端口终止进程
@@ -14,12 +14,14 @@ import csv
 import ctypes
 import io
 import json
+import mimetypes
 import os
 import platform
 import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -44,6 +46,7 @@ def resource_path(rel):
 
 
 INDEX_PATH = resource_path("index.html")
+STATIC_DIR = resource_path("static")
 
 
 def _win_proc_map():
@@ -860,6 +863,334 @@ def delete_paths(paths):
             "failed": failed, "details": details}
 
 
+# ===========================================================================
+# 代码搜索 —— 在本地目录中按内容查找文本，自动跳过版本库/压缩包/二进制，
+# 并把命中的文本文件按 代码 / 配置文件 / 其他文本 分组。
+# ===========================================================================
+
+# 跳过的目录：版本管理目录 + 体积巨大且通常无需搜索的依赖/构建目录
+SKIP_DIRS = {
+    ".git", ".svn", ".hg", ".bzr", ".idea", ".vscode",
+    "node_modules", "__pycache__", ".venv", "venv", "env", ".tox",
+    "dist", "build", "target", ".gradle", ".next", ".nuxt", "out",
+    "bin", "obj", "vendor", "site-packages",
+}
+# 压缩包 / 归档（显式跳过，满足“跳过压缩包”要求）
+ARCHIVE_EXT = {
+    "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "lz4", "zst",
+    "jar", "war", "ear", "iso", "img", "dmg", "cab", "ace", "arj", "lzh",
+    "zoo", "apk", "deb", "rpm", "msi", "wim", "esd", "pak", "crx",
+}
+# 其它常见二进制（读取无意义；NUL 嗅探会兜底，这里显式列出避免大文件读盘）
+BINARY_EXT = {
+    "exe", "dll", "so", "dylib", "sys", "drv", "bin", "dat", "pdb", "obj",
+    "o", "a", "lib", "pyd", "class", "node", "wasm",
+    "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "tiff", "tif", "heic",
+    "mp3", "mp4", "avi", "mov", "mkv", "webm", "wav", "flac", "ogg", "m4a", "aac",
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pub", "odt", "ods", "odp",
+    "ttf", "otf", "woff", "woff2", "eot", "db", "sqlite", "sqlite3", "mdb", "accdb",
+}
+# 文件分类（按扩展名）
+CODE_EXT = {
+    "c", "h", "cpp", "cc", "cxx", "hpp", "hxx", "hh", "c++", "h++",
+    "py", "pyw", "js", "jsx", "mjs", "cjs", "ts", "tsx",
+    "java", "kt", "kts", "go", "rs", "rb", "rbw", "php", "php3", "php4", "phtml",
+    "cs", "vb", "vbs", "swift", "m", "mm", "scala", "sc", "groovy", "gradle",
+    "sh", "bash", "zsh", "fish", "bat", "cmd", "ps1", "psm1",
+    "sql", "lua", "pl", "pm", "r", "dart", "vue", "svelte",
+    "html", "htm", "xhtml", "css", "scss", "sass", "less", "styl",
+    "json", "json5", "jsonc", "xml", "xsl", "xslt", "xsd", "wsdl", "svg",
+    "graphql", "gql", "proto", "asm", "s", "tex", "ipynb", "jl",
+    "ex", "exs", "erl", "hrl", "hs", "lhs", "clj", "cljs", "cljc",
+    "tf", "tfvars", "tpl", "tmpl", "ejs", "pug", "jade", "haml", "mustache",
+    "coffee", "rkt", "nim", "cr", "zig", "d", "f", "f90", "f95", "ada", "adb", "ads",
+}
+CONFIG_EXT = {
+    "ini", "cfg", "conf", "config", "toml", "env", "properties", "cnf", "inf",
+    "prop", "yaml", "yml", "editorconfig",
+    "gitignore", "gitattributes", "gitmodules", "dockerignore", "npmrc", "yarnrc",
+    "babelrc", "eslintrc", "prettierrc", "npmignore", "pylintrc", "flake8",
+    "git-blame-ignore-revs", "htpasswd", "netrc", "service", "socket", "mount",
+}
+OTHER_EXT = {
+    "txt", "text", "md", "markdown", "rst", "adoc", "asciidoc", "log", "csv",
+    "tsv", "rtf", "org", "1st", "textile", "texinfo",
+}
+# 无扩展名但有明确含义的文件（按文件名归类）
+NAME_MAP = {
+    "makefile": "code", "dockerfile": "code", "cmakelists.txt": "code",
+    "rakefile": "code", "gemfile": "code", "vagrantfile": "code",
+    "procfile": "code", "build.gradle": "code", "build.gradle.kts": "code",
+    "pom.xml": "code", "meson.build": "code", "justfile": "code",
+    ".gitignore": "config", ".gitattributes": "config", ".gitmodules": "config",
+    ".dockerignore": "config", ".npmrc": "config", ".editorconfig": "config",
+    ".babelrc": "config", ".eslintrc": "config", ".npmignore": "config",
+    ".pylintrc": "config", ".flake8": "config",
+    "license": "other", "licence": "other", "readme": "other", "readme.md": "other",
+    "changelog": "other", "copying": "other", "authors": "other", "contributors": "other",
+}
+
+
+def _categorize(ext, name):
+    """把文件归入 code / config / other 三类。"""
+    nl = name.lower()
+    if nl in NAME_MAP:
+        return NAME_MAP[nl]
+    if ext in CODE_EXT:
+        return "code"
+    if ext in CONFIG_EXT:
+        return "config"
+    if ext in OTHER_EXT:
+        return "other"
+    return "other"
+
+
+def _detect_encoding(path):
+    """探测文本编码：utf-8(-sig) / gbk；都失败视为二进制，返回 None。"""
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(32768)
+    except OSError:
+        return None
+    if not chunk:
+        return "utf-8"
+    if chunk.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    try:
+        chunk.decode("utf-8")
+        return "utf-8"
+    except UnicodeDecodeError:
+        pass
+    try:
+        chunk.decode("gbk")
+        return "gbk"
+    except UnicodeDecodeError:
+        return None
+
+
+def code_search(directory, query, mode="text", case=False, name_only=False,
+                ext_filter=None, recursive=True, max_files=500,
+                max_per_file=200, max_file_mb=8, time_limit=60.0, scope=None):
+    """边扫描边 yield 进度事件，最后 yield 完整结果。
+    进度事件：{"type":"progress","dir":当前目录,"scanned":已扫描,"found":已命中}
+    结果事件：{"type":"result", ...}
+    scope 为允许搜索的文件类别集合（'code'/'config'/'other'），为空表示全部。"""
+    directory = os.path.abspath(directory)
+    if not os.path.isdir(directory):
+        yield {"ok": False, "error": "目录不存在或不可访问：" + directory}
+        return
+    if not query:
+        yield {"ok": False, "error": "请输入要搜索的关键词"}
+        return
+
+    flags = 0 if case else re.IGNORECASE
+    rx = None
+    if mode == "regex":
+        try:
+            rx = re.compile(query, flags)
+        except re.error as e:
+            yield {"ok": False, "error": "正则表达式无效：" + str(e)}
+            return
+    # 普通文本模式预转小写，避免每行 lower()
+    qlow = (query.lower() if (mode == "text" and not case) else None)
+    ext_set = None
+    if ext_filter:
+        ext_set = set(e.lower().lstrip(".") for e in str(ext_filter).split(",") if e.strip())
+
+    stats = {"scannedFiles": 0, "skippedBinary": 0, "skippedArchive": 0,
+             "skippedLarge": 0, "skippedExt": 0, "vcsDirs": 0, "skippedScope": 0}
+    groups = {"code": 0, "config": 0, "other": 0}
+    results = []
+    total_matches = 0
+    start = time.time()
+    deadline = start + time_limit
+    truncated = False
+
+    def files():
+        if recursive:
+            for root, dirs, files in os.walk(directory, onerror=lambda e: None):
+                # 剪枝：跳过版本库 / 构建产物等巨型目录
+                pruned = [d for d in dirs if d in SKIP_DIRS]
+                stats["vcsDirs"] += len(pruned)
+                dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+                for f in files:
+                    yield os.path.join(root, f)
+        else:
+            try:
+                with os.scandir(directory) as it:
+                    for e in it:
+                        if e.is_file():
+                            yield e.path
+            except OSError:
+                return
+
+    cur_dir = None
+    last_progress = start
+    for fpath in files():
+        if time.time() > deadline or len(results) >= max_files:
+            truncated = True
+            break
+        now = time.time()
+        d = os.path.dirname(fpath)
+        if d != cur_dir or now - last_progress >= 0.25:
+            cur_dir = d
+            last_progress = now
+            yield {"type": "progress", "dir": d,
+                   "scanned": stats["scannedFiles"], "found": len(results),
+                   "groups": dict(groups),
+                   "skipped": {"binary": stats["skippedBinary"], "archive": stats["skippedArchive"],
+                               "large": stats["skippedLarge"], "ext": stats["skippedExt"],
+                               "vcsDirs": stats["vcsDirs"], "scope": stats["skippedScope"]}}
+        ext = os.path.splitext(fpath)[1].lower().lstrip(".")
+        if ext_set is not None and ext not in ext_set:
+            stats["skippedExt"] += 1
+            continue
+        if ext in ARCHIVE_EXT:
+            stats["skippedArchive"] += 1
+            continue
+        if ext in BINARY_EXT:
+            stats["skippedBinary"] += 1
+            continue
+        try:
+            size = os.path.getsize(fpath)
+        except OSError:
+            continue
+        if max_file_mb and size > max_file_mb * 1024 * 1024:
+            stats["skippedLarge"] += 1
+            continue
+        # 二进制嗅探：含 NUL 字节即视为二进制
+        try:
+            with open(fpath, "rb") as fb:
+                head = fb.read(8192)
+        except OSError:
+            continue
+        if b"\x00" in head:
+            stats["skippedBinary"] += 1
+            continue
+        base = os.path.basename(fpath)
+        grp = _categorize(ext, base)
+        if scope and grp not in scope:
+            stats["skippedScope"] += 1
+            continue
+        # 仅按文件名匹配
+        if name_only:
+            stats["scannedFiles"] += 1
+            if qlow is not None:
+                hit = qlow in base.lower()
+            elif rx is not None:
+                hit = bool(rx.search(base))
+            else:
+                hit = query in base
+            if hit:
+                groups[grp] += 1
+                rec = {"path": fpath, "rel": os.path.relpath(fpath, directory),
+                       "group": grp, "size": size, "matches": [], "matchCount": 0}
+                results.append(rec)
+                yield {"type": "hit", "file": rec,
+                       "scanned": stats["scannedFiles"], "found": len(results)}
+            continue
+        # 内容搜索
+        enc = _detect_encoding(fpath)
+        if enc is None:
+            stats["skippedBinary"] += 1
+            continue
+        stats["scannedFiles"] += 1  # 真正读取并检索的文本文件
+        matches = []
+        try:
+            with open(fpath, "r", encoding=enc, errors="replace") as fh:
+                for i, line in enumerate(fh, 1):
+                    if len(matches) >= max_per_file:
+                        break
+                    text = line.rstrip("\n").rstrip("\r")
+                    if qlow is not None:
+                        hit = qlow in text.lower()
+                    elif rx is not None:
+                        hit = bool(rx.search(text))
+                    else:
+                        hit = query in text
+                    if hit:
+                        matches.append({"line": i, "text": text[:1000]})
+        except OSError:
+            continue
+        if matches:
+            groups[grp] += 1
+            total_matches += len(matches)
+            rec = {"path": fpath, "rel": os.path.relpath(fpath, directory),
+                   "group": grp, "size": size,
+                   "matches": matches, "matchCount": len(matches)}
+            results.append(rec)
+            yield {"type": "hit", "file": rec,
+                   "scanned": stats["scannedFiles"], "found": len(results)}
+
+    result = {
+        "ok": True, "dir": directory, "query": query, "mode": mode, "case": case,
+        "nameOnly": name_only, "elapsed": round(time.time() - start, 3),
+        "scannedFiles": stats["scannedFiles"], "totalMatches": total_matches,
+        "skipped": {"binary": stats["skippedBinary"], "archive": stats["skippedArchive"],
+                    "large": stats["skippedLarge"], "ext": stats["skippedExt"],
+                    "vcsDirs": stats["vcsDirs"], "scope": stats["skippedScope"]},
+        "groups": groups, "totalFiles": len(results), "truncated": truncated,
+        "results": results,
+    }
+    result["type"] = "result"
+    yield result
+
+
+# ---- 搜索历史（记录用户最近查询的目录，持久化到本地 JSON）----
+_history_lock = threading.Lock()
+
+
+def _history_file():
+    """返回可写的搜索历史文件路径；按可写性依次尝试 exe 同目录 / 用户主目录 / 临时目录。"""
+    candidates = []
+    try:
+        candidates.append(os.path.dirname(os.path.abspath(sys.argv[0])))
+    except Exception:
+        pass
+    try:
+        candidates.append(os.path.expanduser("~"))
+    except Exception:
+        pass
+    candidates.append(tempfile.gettempdir())
+    for c in candidates:
+        if not c or not os.path.isdir(c):
+            continue
+        p = os.path.join(c, "port_inspector_search_history.json")
+        try:
+            with open(p, "a", encoding="utf-8"):
+                pass
+            return p
+        except OSError:
+            continue
+    return candidates[-1]
+
+
+def _load_history():
+    try:
+        with open(_history_file(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [str(x) for x in data if x][:20]
+    except Exception:
+        pass
+    return []
+
+
+def _record_history(directory):
+    d = os.path.abspath(directory)
+    with _history_lock:
+        lst = _load_history()
+        lst = [x for x in lst if x != d]
+        lst.insert(0, d)
+        lst = lst[:20]
+        try:
+            with open(_history_file(), "w", encoding="utf-8") as f:
+                json.dump(lst, f, ensure_ascii=False)
+        except Exception:
+            pass
+        return lst
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, payload, content_type="application/json; charset=utf-8"):
         data = payload if isinstance(payload, bytes) else payload.encode("utf-8")
@@ -873,8 +1204,34 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code, obj):
         self._send(code, json.dumps(obj, ensure_ascii=False))
 
+    def _serve_static(self, rel_path):
+        """托管 static 目录下的资源（CSS / JS 模块）。禁止路径穿越。"""
+        full = os.path.normpath(os.path.join(STATIC_DIR, rel_path))
+        root = os.path.normpath(STATIC_DIR)
+        if not full.startswith(root + os.sep) and full != root:
+            self._json(403, {"error": "forbidden"})
+            return
+        if not os.path.isfile(full):
+            self._json(404, {"error": "not found"})
+            return
+        ctype, _ = mimetypes.guess_type(full)
+        ctype = ctype or "application/octet-stream"
+        if ctype.startswith("text/") or ctype in (
+            "application/javascript", "application/json"):
+            ctype += "; charset=utf-8"
+        try:
+            with open(full, "rb") as f:
+                data = f.read()
+        except OSError:
+            self._json(404, {"error": "not found"})
+            return
+        self._send(200, data, ctype)
+
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
+        if path.startswith("/static/"):
+            self._serve_static(path[len("/static/"):])
+            return
         if path in ("/", "/index.html"):
             try:
                 with open(INDEX_PATH, "r", encoding="utf-8") as f:
@@ -904,6 +1261,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": False, "disks": [], "error": "无法获取磁盘信息（仅支持 Windows）"})
             else:
                 self._json(200, dict(ok=True, **snap))
+        elif path == "/api/search/history":
+            self._json(200, {"ok": True, "history": _load_history()})
         else:
             self._json(404, {"error": "not found"})
 
@@ -963,6 +1322,52 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 result = {"success": False, "error": f"删除失败：{e}"}
             self._json(200, result)
+        elif path == "/api/search":
+            try:
+                directory = (data.get("dir") or "").strip()
+                query = (data.get("query") or "").strip()
+                mode = data.get("mode") or "text"
+                case = bool(data.get("case"))
+                name_only = bool(data.get("nameOnly"))
+                ext = data.get("ext") or ""
+                recursive = data.get("recursive", True)
+                try:
+                    max_files = int(data.get("maxFiles") or 500)
+                except (TypeError, ValueError):
+                    max_files = 500
+                try:
+                    time_limit = float(data.get("timeLimit") or 60.0)
+                except (TypeError, ValueError):
+                    time_limit = 60.0
+                scope_raw = data.get("scope") or ""
+                scope = set(s.strip().lower() for s in str(scope_raw).split(",") if s.strip()) or None
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                gen = code_search(
+                    directory, query, mode=mode, case=case, name_only=name_only,
+                    ext_filter=ext, recursive=recursive, max_files=max_files,
+                    time_limit=time_limit, scope=scope,
+                )
+                try:
+                    for ev in gen:
+                        if ev.get("type") == "result" and ev.get("ok"):
+                            ev["history"] = _record_history(directory)
+                        try:
+                            self.wfile.write((json.dumps(ev, ensure_ascii=False) + "\n").encode("utf-8"))
+                            self.wfile.flush()
+                        except (BrokenPipeError, OSError):
+                            break  # 客户端已断开（用户中断），跳出后关闭生成器
+                finally:
+                    gen.close()  # 立即终止扫描，不再遍历剩余文件
+            except Exception as e:
+                try:
+                    self.wfile.write((json.dumps({"ok": False, "error": f"搜索失败：{e}"}) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+                except Exception:
+                    pass
         else:
             self._json(404, {"error": "not found"})
 
@@ -981,8 +1386,8 @@ def main():
     # 多线程：进程快照（PowerShell）较慢时不会阻塞端口查询等其它请求
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}"
-    print(f"PortInspector 已启动： {url}")
-    print("功能：端口占用查看 / 系统内存监控（页面顶部 Tab 切换）")
+    print(f"OneKit 已启动： {url}")
+    print("功能：端口占用 / 内存监控 / 系统服务 / 磁盘清理 / 代码搜索 / JWT 解密 / JSON 格式化 / 时间戳转换 / Base64 编解码 / UTF-8 转义（页面顶部 Tab 切换）")
     print("按 Ctrl+C 停止")
     if not no_browser:
         try:
