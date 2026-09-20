@@ -232,7 +232,8 @@ function makeResultItem(f) {
   sum.className = "res-sum";
   sum.innerHTML =
     '<span class="fpath" title="' + esc(f.path) + '">' + esc(f.rel) + '</span>' +
-    '<span class="rc">匹配 ' + f.matchCount + ' 处 · ' + fmtB(f.size) + '</span>';
+    '<span class="rc">匹配 ' + (f.moreMatches ? "≥" + f.matchCount : f.matchCount) +
+    ' 处 · ' + fmtB(f.size) + '</span>';
   det.appendChild(sum);
 
   if (f.matches && f.matches.length) {

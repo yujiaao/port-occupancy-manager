@@ -890,6 +890,8 @@ BINARY_EXT = {
     "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pub", "odt", "ods", "odp",
     "ttf", "otf", "woff", "woff2", "eot", "db", "sqlite", "sqlite3", "mdb", "accdb",
 }
+# 大文件阈值：正文超过此体积的文件，命中一处即停止继续读该文件
+BIG_FILE_FIRST_HIT_BYTES = 100 * 1024
 # 文件分类（按扩展名）
 CODE_EXT = {
     "c", "h", "cpp", "cc", "cxx", "hpp", "hxx", "hh", "c++", "h++",
@@ -1095,11 +1097,15 @@ def code_search(directory, query, mode="text", case=False, name_only=False,
             stats["skippedBinary"] += 1
             continue
         stats["scannedFiles"] += 1  # 真正读取并检索的文本文件
+        # 大文件（>100KB）命中一处即停：全量扫描代价高，通常只需知道"这个文件里有"
+        file_limit = 1 if size > BIG_FILE_FIRST_HIT_BYTES else max_per_file
         matches = []
+        stopped_early = False   # 命中数触顶即停，文件里可能还有更多命中
         try:
             with open(fpath, "r", encoding=enc, errors="replace") as fh:
                 for i, line in enumerate(fh, 1):
-                    if len(matches) >= max_per_file:
+                    if len(matches) >= file_limit:
+                        stopped_early = True
                         break
                     text = line.rstrip("\n").rstrip("\r")
                     if qlow is not None:
@@ -1117,7 +1123,8 @@ def code_search(directory, query, mode="text", case=False, name_only=False,
             total_matches += len(matches)
             rec = {"path": fpath, "rel": os.path.relpath(fpath, directory),
                    "group": grp, "size": size,
-                   "matches": matches, "matchCount": len(matches)}
+                   "matches": matches, "matchCount": len(matches),
+                   "moreMatches": stopped_early}
             results.append(rec)
             yield {"type": "hit", "file": rec,
                    "scanned": stats["scannedFiles"], "found": len(results)}
