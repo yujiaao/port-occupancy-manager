@@ -1,6 +1,6 @@
 # OneKit · 本地系统工具箱
 
-> 一个零依赖的本地运维小工具，十个 Tab 一站式：**端口占用查看与进程终止**、**Windows 服务启停**、**系统内存（提交空间）监控报警**、**磁盘容量监控与垃圾清理**、**本地代码/文本搜索**、**JWT 解密**、**JSON 格式化**、**时间戳转换**、**Base64 编解码**、**UTF-8 转义**。双击即用，玻璃拟态深色 UI，所有危险操作全程二次确认。
+> 一个零依赖的本地运维小工具，十一个 Tab 一站式：**端口占用查看与进程终止**、**Windows 服务启停**、**系统内存（提交空间）监控报警**、**磁盘容量监控与垃圾清理**、**本地代码/文本搜索**、**JWT 解密**、**JSON 格式化**、**时间戳转换**、**Base64 编解码**、**UTF-8 转义**、**HTTPS 证书检测**。双击即用，玻璃拟态深色 UI，所有危险操作全程二次确认。
 
 [![Release](https://img.shields.io/github/v/release/yujiaao/onekit)](https://github.com/yujiaao/onekit/releases/tag/v1.0.0)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org)
@@ -92,6 +92,17 @@
 - **两种格式**：`\uXXXX`（Unicode 转义，可打印 ASCII 保持原样，非 ASCII 按码点转义并支持代理对 / `\u{...}`）与 `\xHH`（UTF-8 字节转义，逐字节）
 - **编码 / 解码切换**：输入即转换；解码时非法 `\u` / `\xHH` 会给出明确报错
 - **辅助操作**：复制结果、交换输入输出、清空
+
+### Tab 11 · HTTPS 证书检测
+
+- **直连读取**：输入域名 / URL / IP（可带端口），本机直连目标端口读取 TLS 叶证书，不发送任何业务数据
+- **信任校验**：用系统 CA 做完整链校验；即使证书过期 / 自签名 / 域名不符 / 缺中间证书，也会照常展示明细并给出可读的失败原因
+- **有效期可视化**：剩余天数、起止时间、是否已过期 / 尚未生效一目了然；≤15 天自动风险提示
+- **算法强度**：解析签名算法与公钥算法 / 密钥长度 / EC 曲线，弱算法（MD5 / SHA1）高亮提醒
+- **域名匹配**：优先 SAN，无 SAN 时回退 CN；通配符只匹配一级子域
+- **指纹与 PEM**：SHA-256 / SHA-1 指纹、OCSP / CA Issuers / CRL、叶证书 PEM 一键复制
+- **零依赖**：只用 Python 标准库，自带极简 DER 解析器补齐 `getpeercert()` 缺失的算法字段
+- **最近查询**：本地保存最近 12 条目标，输入框下拉可选
 
 ### 通用
 
@@ -227,6 +238,7 @@ onekit/
 │   ├── services.py        # Windows 服务列表与启停
 │   ├── disks.py           # 分区容量 / 垃圾清理 / 大文件
 │   ├── search.py          # 目录全文搜索与搜索历史
+│   ├── certinfo.py        # HTTPS 证书检测（信任链 / 有效期 / 域名匹配 / 算法强度，零依赖 DER 解析）
 │   └── http_app.py        # HTTP 路由层（Handler，路由表可扩展）
 ├── index.html             # 前端入口：Tab 结构 + 弹窗，样式与脚本外链到 static/
 ├── static/
@@ -243,7 +255,8 @@ onekit/
 │       ├── jsonfmt.js     # JSON 格式化 Tab（纯前端格式化 / 压缩 / 校验）
 │       ├── tsconv.js       # 时间戳转换 Tab（纯前端时间戳 ↔ 日期）
 │       ├── b64.js          # Base64 编解码 Tab（纯前端文本 ↔ Base64）
-│       └── utf8.js         # UTF-8 转义 Tab（纯前端文本 ↔ \uXXXX / \xHH）
+│       ├── utf8.js         # UTF-8 转义 Tab（纯前端文本 ↔ \uXXXX / \xHH）
+│       └── cert.js         # HTTPS 证书检测 Tab（调用后端 /api/cert）
 ├── OneKit.spec            # PyInstaller 打包配置（含 static/）
 ├── dist/
 │   └── OneKit.exe         # 单文件可执行（双击即用）

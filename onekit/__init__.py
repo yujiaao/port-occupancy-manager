@@ -11,6 +11,7 @@
   services —— Windows 服务列表与启停
   disks    —— 分区容量 / 垃圾清理 / 大文件
   search   —— 目录全文搜索与搜索历史
+  certinfo —— HTTPS 证书检测（含零依赖 DER 解析）
   http_app —— HTTP 路由层（Handler）
 
 新增一个后端接口的标准姿势：

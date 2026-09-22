@@ -84,6 +84,12 @@
         </svg>
         UTF-8 转义
       </button>
+      <button class="tab" data-view="cert">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l7 3v6c0 4.4-3 8.3-7 9-4-.7-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/>
+        </svg>
+        HTTPS 证书
+      </button>
     </div>
 
     <section id="view-ports">
@@ -595,6 +601,45 @@
         <pre class="jwt-json" id="utf8Output" style="margin-top:12px"></pre>
         <pre class="json-err" id="utf8Err" style="display:none"></pre>
       </div>
+    </section>
+
+    <section id="view-cert" hidden>
+      <div class="sysbar">
+        <span class="badge" id="certBadge"><span class="dot"></span><span id="certBadgeTxt">待检测</span></span>
+        <span class="hint">输入域名 / URL / IP（可带端口），本机直连读取 TLS 证书，校验信任链、有效期与域名匹配，并解析签名算法和密钥强度</span>
+      </div>
+
+      <div class="panel">
+        <div class="search-row">
+          <label>目标</label>
+          <input id="certTarget" class="inp" list="certHistory" placeholder="如 example.com、example.com:8443、https://example.com/login" style="flex:1 1 320px" />
+          <datalist id="certHistory"></datalist>
+          <label class="num">端口<input id="certPort" class="inp" type="number" min="1" max="65535" placeholder="443" /></label>
+          <label class="num">超时(秒)<input id="certTimeout" class="inp" type="number" min="1" max="60" value="10" /></label>
+          <button class="btn primary" id="certBtn">验证</button>
+          <button class="btn ghost" id="certClearBtn">清空</button>
+        </div>
+        <p class="sysnote">只读取对端证书，不发送任何业务数据，结果不做缓存。即使证书过期 / 自签名 / 域名不符，也会照常展示明细与失败原因。</p>
+      </div>
+
+      <div class="stats" id="certStats" style="display:none;margin-top:16px">
+        <div class="stat m4"><div class="k">剩余有效期</div><div class="v" id="certDays">—</div><div class="s" id="certDaysSub">—</div></div>
+        <div class="stat m1"><div class="k">信任状态</div><div class="v" id="certTrust">—</div><div class="s" id="certTrustSub">—</div></div>
+        <div class="stat m2"><div class="k">协议</div><div class="v" id="certProto">—</div><div class="s" id="certCipher">—</div></div>
+        <div class="stat m3"><div class="k">密钥强度</div><div class="v" id="certKey">—</div><div class="s" id="certSig">—</div></div>
+      </div>
+
+      <div class="panel" id="certDetail" style="display:none;margin-top:16px">
+        <h3>证书明细 <span class="sub">Subject / Issuer / 有效期 / SAN / 指纹</span></h3>
+        <dl class="kv" id="certKv"></dl>
+      </div>
+
+      <div class="jwt-block" id="certPemPanel" style="display:none;margin-top:16px">
+        <div class="jb-head"><span>叶证书 PEM</span><button class="btn ghost" id="certCopyPem">复制 PEM</button></div>
+        <pre class="jwt-json" id="certPem"></pre>
+      </div>
+
+      <pre class="json-err" id="certErr" style="display:none"></pre>
     </section>
   </div>
 

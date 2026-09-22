@@ -12,6 +12,7 @@ import { loadJsonFmt } from "./jsonfmt.js";
 import { loadTsConv } from "./tsconv.js";
 import { loadB64 } from "./b64.js";
 import { loadUtf8 } from "./utf8.js";
+import { loadCert } from "./cert.js";
 
 function switchView(v) {
   state.curView = v;
@@ -26,6 +27,7 @@ function switchView(v) {
   $("view-tsconv").hidden = v !== "tsconv";
   $("view-b64").hidden = v !== "b64";
   $("view-utf8").hidden = v !== "utf8";
+  $("view-cert").hidden = v !== "cert";
   if (v === "ports") fetchPorts();
   else if (v === "services") { if (!state.servicesLoaded) fetchServices(); }
   else if (v === "disks") { if (!state.disksLoaded) fetchDisks(); }
@@ -35,6 +37,7 @@ function switchView(v) {
   else if (v === "tsconv") { loadTsConv(); }
   else if (v === "b64") { loadB64(); }
   else if (v === "utf8") { loadUtf8(); }
+  else if (v === "cert") { loadCert(); }
   else { requestAnimationFrame(drawChart); if (!state.memLoaded) sysTick(); }
 }
 

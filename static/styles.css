@@ -455,6 +455,15 @@
     background: rgba(255,90,90,0.12); border: 1px solid rgba(255,90,90,0.35); color: #ffb4b4;
   }
 
+  /* ===== HTTPS 证书检测 ===== */
+  #certKv { grid-template-columns: 116px 1fr; }
+  #certKv dd { text-align: left; }
+  .cert-san { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cert-san i {
+    font-style: normal; background: rgba(255,255,255,0.06); border: 1px solid var(--panel-border);
+    border-radius: 6px; padding: 2px 7px; font-size: 11.5px;
+  }
+
   /* ===== 时间戳转换 ===== */
   .ts-out { margin-top: 14px; border: 1px solid var(--panel-border); border-radius: 12px; overflow: hidden; }
   .ts-row {

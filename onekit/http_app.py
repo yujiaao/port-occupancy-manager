@@ -10,7 +10,7 @@ import os
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
-from . import disks, memory, ports, search, services
+from . import certinfo, disks, memory, ports, search, services
 from .config import INDEX_PATH, STATIC_DIR
 from .winapi import is_admin
 
@@ -33,6 +33,7 @@ class Handler(BaseHTTPRequestHandler):
         "/api/bigfiles": "_post_bigfiles",
         "/api/delete_paths": "_post_delete_paths",
         "/api/search": "_post_search",
+        "/api/cert": "_post_cert",
     }
 
     # -------------------------------------------------------------- 基础输出
@@ -195,6 +196,14 @@ class Handler(BaseHTTPRequestHandler):
             result = disks.delete_paths(data.get("paths") or [])
         except Exception as e:
             result = {"success": False, "error": f"删除失败：{e}"}
+        self._json(200, result)
+
+    def _post_cert(self, data):
+        try:
+            result = certinfo.inspect(data.get("target") or data.get("host") or "",
+                                      data.get("port"), data.get("timeout") or 10)
+        except Exception as e:
+            result = {"ok": False, "error": f"检测失败：{e}"}
         self._json(200, result)
 
     def _post_search(self, data):
