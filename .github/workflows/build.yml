@@ -1,0 +1,79 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: OneKit-windows.exe
+            spec: OneKit.spec
+          - os: macos-13       # Intel Mac
+            artifact: OneKit-macos-x64.zip
+          - os: macos-14       # Apple Silicon
+            artifact: OneKit-macos-arm64.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      # ── Windows ────────────────────────────────────────────
+      - name: Build Windows exe
+        if: runner.os == 'Windows'
+        run: pyinstaller --noconfirm ${{ matrix.spec }}
+
+      - name: Upload Windows artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/OneKit.exe
+
+      # ── macOS ──────────────────────────────────────────────
+      - name: Build macOS app
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --onedir --windowed \
+            --name OneKit \
+            --add-data "index.html:." \
+            --add-data "static:static" \
+            server.py
+          cd dist && zip -r ../${{ matrix.artifact }} OneKit.app
+
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

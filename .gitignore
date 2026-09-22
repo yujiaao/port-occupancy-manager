@@ -10,3 +10,5 @@ dist/*
 
 # 运行时产物：每次搜索都会变化，且含本机绝对路径
 port_inspector_search_history.json
+.playwright-cli/
+

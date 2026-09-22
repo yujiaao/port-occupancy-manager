@@ -1,77 +1,33 @@
 # -*- coding: utf-8 -*-
 """磁盘 —— 分区容量 / 垃圾扫描清理 / 大文件扫描与删除。
 
-清理类别与保护规则都集中在文件顶部，新增一类缓存只要往 CATALOGS 里加一行。
+平台相关部分（分区列表、清理类别、受保护路径）通过 backend 获取，
+文件遍历与删除逻辑跨平台通用。
 """
 import os
 import time
 
-from .config import IS_WINDOWS
-from .winapi import DRIVE_TYPES, logical_drives, pct, volume_info
+from .platform import backend
 
 
 def clean_catalogs():
-    """清理类别：(id, 显示名, 路径, 默认是否勾选)。全部为可安全删除的缓存/临时目录。"""
-    env = os.environ
-    local = env.get("LOCALAPPDATA", "")
-    roaming = env.get("APPDATA", "")
-    windir = env.get("windir", r"C:\Windows")
-    temp = env.get("TEMP") or (os.path.join(local, "Temp") if local else "")
-    return [
-        ("user_temp", "用户临时文件", temp, True),
-        ("win_temp", "Windows 临时文件", os.path.join(windir, "Temp"), True),
-        ("thumbcache", "缩略图缓存", os.path.join(local, "Microsoft", "Windows", "Explorer"), True),
-        ("crash_dumps", "崩溃转储文件", os.path.join(local, "CrashDumps"), True),
-        ("wer", "Windows 错误报告", os.path.join(local, "Microsoft", "Windows", "WER"), True),
-        ("npm_cache", "npm 缓存", os.path.join(roaming, "npm-cache"), True),
-        ("pip_cache", "pip 缓存", os.path.join(local, "pip", "cache"), True),
-        ("yarn_cache", "Yarn 缓存", os.path.join(local, "Yarn", "Cache"), True),
-        ("go_build", "Go 构建缓存", os.path.join(local, "go-build"), True),
-        ("prefetch", "Windows 预取文件", os.path.join(windir, "Prefetch"), False),
-        ("wu_cache", "Windows Update 缓存", os.path.join(windir, "SoftwareDistribution", "Download"), False),
-        ("recycle", "回收站", "", False),
-    ]
+    """清理类别：(id, 显示名, 路径, 默认是否勾选)。"""
+    return backend.clean_catalogs()
 
 
 def disk_snapshot():
-    """各分区容量（GetDiskFreeSpaceExW / GetVolumeInformationW）。"""
-    if not IS_WINDOWS:
-        return None
-    out = []
-    for drive in logical_drives():
-        ready, dtype, label, fs, total_v, free_v = volume_info(drive)
-        # 未就绪的盘（空光驱、离线网络盘）查询会失败：仍列出，只是不显示容量
-        used = max(0, total_v - free_v) if ready else 0
-        if not ready:
-            total_v = free_v = 0
-        out.append({
-            "drive": drive,
-            "label": label,
-            "fs": fs,
-            "type": DRIVE_TYPES.get(dtype, "未知"),
-            "total": total_v, "used": used, "free": free_v,
-            "usedPct": pct(used, total_v),
-            "ready": ready,
-        })
-    return {"disks": out} if out else None
-
-
-def _recycle_dirs():
-    dirs = []
-    for d in logical_drives():
-        p = os.path.join(d, "$RECYCLE.BIN")
-        try:
-            if os.path.isdir(p):
-                dirs.append(p)
-        except OSError:
-            pass
-    return dirs
+    """各分区容量。"""
+    return backend.disk_snapshot()
 
 
 def _catalog_paths(cid):
-    """返回该类别对应的真实目录列表（回收站为各盘 $RECYCLE.BIN）。"""
-    if cid == "recycle":
-        return _recycle_dirs()
+    """返回该类别对应的真实目录列表。"""
+    if cid == "recycle" or cid == "trash":
+        # 回收站 / 废纸篓路径由 clean_catalogs 给出
+        for i, _n, path, _r in clean_catalogs():
+            if i == cid:
+                return [path] if path and os.path.isdir(path) else []
+        return []
     for i, _n, path, _r in clean_catalogs():
         if i == cid:
             return [path] if path else []
@@ -94,7 +50,7 @@ def _walk_stats(path, deadline, max_items=40000):
 
 
 def clean_scan(time_budget=18.0):
-    """扫描各清理类别占用；受总时间预算约束，避免卡住请求。"""
+    """扫描各清理类别占用；受总时间预算约束。"""
     deadline = time.time() + time_budget
     items = []
     for cid, name, path, rec in clean_catalogs():
@@ -132,7 +88,7 @@ def _purge_dir(path, deadline):
                 failed += 1
         for d in dirs:
             try:
-                os.rmdir(os.path.join(root, d))   # 只删已空的目录
+                os.rmdir(os.path.join(root, d))
             except OSError:
                 pass
     return removed, freed, failed
@@ -188,14 +144,8 @@ def scan_big_files(root, min_mb=100, limit=50, time_limit=25.0):
 
 
 def is_protected_path(path):
-    """系统目录（Windows / Program Files）下的文件禁止删除。"""
-    low = os.path.abspath(path).lower()
-    guards = [
-        os.environ.get("windir", r"C:\Windows").lower(),
-        os.environ.get("ProgramFiles", r"C:\Program Files").lower(),
-        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)").lower(),
-    ]
-    return any(g and (low == g or low.startswith(g + os.sep)) for g in guards)
+    """系统目录下的文件禁止删除。"""
+    return backend.is_protected_path(path)
 
 
 def delete_paths(paths):
