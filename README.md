@@ -120,7 +120,9 @@
 1. 下载 `OneKit.exe`
    - 仓库文件页：<https://github.com/yujiaao/onekit/blob/main/dist/OneKit.exe>
    - 或直接下载：<https://raw.githubusercontent.com/yujiaao/onekit/main/dist/OneKit.exe>
-2. 双击运行，浏览器自动打开 <http://127.0.0.1:8765>
+2. **双击运行**，首次会弹出 Windows 用户账户控制（UAC）请求提权，点「是」后浏览器自动打开 <http://127.0.0.1:8765>
+   - `OneKit.exe` 已内嵌 `requireAdministrator` 清单，**启动即自动以管理员身份运行**，页面顶部徽章显示绿色「管理员模式」；端口强杀、服务启停等需要权限的操作开箱即用
+   - 若取消 UAC 授权，程序将**不会启动**（无法进入「受限模式」）
 
 可选命令行参数：
 
@@ -129,7 +131,7 @@ OneKit.exe 9000          # 指定监听端口
 OneKit.exe --no-browser  # 不自动打开浏览器
 ```
 
-> **要用「系统服务」启停功能时，请右键以管理员身份运行**；非管理员也能查看列表，但启停会被系统拒绝（Access denied）。
+> **从源码运行（方式二）时**没有内嵌提权清单：需要服务启停等管理员功能，请在该终端**以管理员身份运行 `python server.py`**；普通身份启动则进入「受限模式」，只能查看列表，启停会被系统拒绝（Access denied）。
 
 ### 方式二：从源码运行（需 Python 3.8+）
 
@@ -146,6 +148,10 @@ python server.py
 pip install pyinstaller
 pyinstaller OneKit.spec --noconfirm   # 产物： dist/OneKit.exe
 ```
+
+> 打包配置 `OneKit.spec` 中 `EXE(..., uac_admin=True)` 会内嵌 `requireAdministrator` 清单：
+> 双击生成的 exe 会自动申请管理员权限，**无需再手动右键「以管理员身份运行」**。
+> 若想保留「能看不能改」的受限模式，把 `uac_admin=True` 删掉重新打包即可。
 
 ## 使用说明
 
@@ -202,7 +208,7 @@ pyinstaller OneKit.spec --noconfirm   # 产物： dist/OneKit.exe
 | 系统指标 | `ctypes` 调用 `GlobalMemoryStatusEx` / `GetTickCount64` / `IsUserAnAdmin` | 无需 WMI 轮询即可拿到与 `hs_err` 同源的内存数据 |
 | 进程 / 服务 | `tasklist`、`taskkill`、PowerShell CIM（`Win32_Process` / `Win32_Service`） | 进程快照 15 秒缓存，服务列表 20 秒缓存，操作后主动刷新 |
 | 前端 | 原生 HTML / CSS / JavaScript | 玻璃拟态深色主题，无前端框架，Canvas 手绘趋势图 |
-| 打包 | PyInstaller | 单文件 exe，前端已一同打进可执行文件 |
+| 打包 | PyInstaller | 单文件 exe，前端已一同打进可执行文件；`OneKit.spec` 设 `uac_admin=True` 内嵌 `requireAdministrator` 清单，双击自动申请管理员权限 |
 
 ### 本地 API
 
@@ -272,7 +278,9 @@ onekit/
 部分企业终端防护软件可能拦截 `taskkill`。工具已做超时保护，最多等待 10 秒并给出明确反馈，不会卡死界面。
 
 **Q：服务启停提示 Access denied / 操作失败？**
-启停服务需要管理员权限。请关闭本工具后**右键以管理员身份运行**再试（页面徽章应显示「管理员模式」）。
+启停服务需要管理员权限。
+- **用 exe 的话**：双击已自动提权（页面徽章应显示绿色「管理员模式」），若仍在受限模式，说明你之前取消过 UAC 授权 —— 关闭程序后重新双击并点「是」。
+- **从源码运行的话**：请在该终端**以管理员身份运行 `python server.py`**。
 工具会先尝试 PowerShell，失败后自动回退到 `sc.exe` 并把 Win32 错误码翻译成中文原因与处理建议（如 5 权限不足、1062 未启动、1072 已标记删除）。
 
 **Q：nginx 这类服务停止时报「Cannot open nginx service on computer '.'」？**
