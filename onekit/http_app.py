@@ -20,6 +20,7 @@ class Handler(BaseHTTPRequestHandler):
     GET_ROUTES = {
         "/api/ports": "_get_ports",
         "/api/stats": "_get_stats",
+        "/api/admin": "_get_admin",
         "/api/services": "_get_services",
         "/api/disks": "_get_disks",
         "/api/search/history": "_get_search_history",
@@ -110,6 +111,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _get_stats(self, query):
         self._json(200, memory.build_stats())
+
+    def _get_admin(self, query):
+        # 轻量级接口：仅返回当前进程是否以管理员/root 权限运行，
+        # 用于前端全局展示运行模式（管理员模式 / 受限模式）。
+        self._json(200, {"admin": bool(is_admin())})
 
     def _get_services(self, query):
         force = urllib.parse.parse_qs(query).get("force", [""])[0] == "1"

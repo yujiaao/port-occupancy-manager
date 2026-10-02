@@ -1,5 +1,5 @@
 // 系统服务 Tab：列表渲染、搜索/筛选、启动/停止/重启/改启动类型。
-import { $, toast, esc, state } from "./common.js";
+import { $, toast, esc, state, setAdminMode } from "./common.js";
 
 let svcAll = [];
 let svcState = "ALL";
@@ -19,6 +19,7 @@ export async function fetchServices(force) {
     svcAdmin = !!d.admin;
     svcLoaded = true;
     state.servicesLoaded = true;
+    if (d.ok !== false) setAdminMode(svcAdmin);  // 与服务列表结果保持一致
     $("svcAdminHint").textContent = svcAdmin
       ? "已以管理员身份运行，可启动 / 停止服务。"
       : "未以管理员身份运行：启停与修改启动类型可能被系统拒绝（Access denied）。";
@@ -142,10 +143,10 @@ $("svcModalOk").onclick = async () => {
     });
     const d = await res.json();
     if (d.success) {
-      toast(doneTxt + task.name, true);
+      toast(d.message || doneTxt + task.name, true);
       setTimeout(() => fetchServices(true), 700);
     } else {
-      toast("操作失败：" + (d.error || "未知错误"), false);
+      toast("操作失败：" + (d.error || "未知错误") + (d.hint ? "\n建议：" + d.hint : ""), false);
       fetchServices(true);
     }
   } catch (e) {

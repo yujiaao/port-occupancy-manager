@@ -31,6 +31,43 @@ export function esc(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// 全局「运行模式」徽章（管理员 / 受限）。供所有视图共享，一处更新多处同步。
+export function setAdminMode(admin) {
+  window.__onekitAdmin = !!admin;
+  const apply = (id, txt) => {
+    const b = $(id);
+    if (b) {
+      b.className = "badge " + (admin ? "st-ok" : "st-warn");
+      const t = b.querySelector("span:last-child");
+      if (t) t.textContent = txt;
+    }
+  };
+  apply("adminBadge", admin ? "管理员模式" : "受限模式（建议右键以管理员身份运行）");
+  // 同步服务页徽章（仅在尚未加载时，避免覆盖其获取结果）
+  const svc = $("svcBadge"), svcT = $("svcBadgeTxt");
+  if (svc && svcT && svcT.textContent === "加载中…") {
+    apply("svcBadge", admin ? "管理员模式" : "受限模式");
+  }
+}
+
+export function initAdminBadge() {
+  const refresh = async () => {
+    try {
+      const d = await (await fetch("/api/admin", { cache: "no-store" })).json();
+      setAdminMode(!!d.admin);
+    } catch (e) {
+      const b = $("adminBadge");
+      if (b) {
+        b.className = "badge st-warn";
+        const t = b.querySelector("span:last-child");
+        if (t) t.textContent = "模式检测失败";
+      }
+    }
+  };
+  refresh();
+  setInterval(refresh, 30000);
+}
+
 export function fmtB(n) {
   if (n == null || isNaN(n)) return "--";
   if (n >= GB) return (n / GB).toFixed(2) + " GB";

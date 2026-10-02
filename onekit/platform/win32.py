@@ -45,6 +45,37 @@ PROTECTED_SERVICES = {
 }
 _INVALID_NAME_CHARS = re.compile(r"['\";|&`$<>\r\n]")
 
+# sc.exe 启动类型参数映射
+SC_START_MODES = {
+    "Automatic": "auto",
+    "AutomaticDelayedStart": "delayed-auto",
+    "Manual": "demand",
+    "Disabled": "disabled",
+}
+
+# Win32 错误码 → (原因, 处理建议)
+SVC_ERROR_HINTS = {
+    5: ("没有权限打开该服务（Access denied）",
+        "确认本工具是以管理员身份运行的（页面徽章应显示「管理员模式」）；"
+        "若已提权仍失败，该服务可能被安全软件或自定义 ACL 保护，请用 services.msc 手动停止。"),
+    1060: ("服务在系统中已不存在", "刷新列表即可；刚卸载过的服务重启后会消失。"),
+    1061: ("服务当前无法接受控制消息，服务控制管理器无法通知它退出",
+           "该进程很可能不是真正的 Windows 服务程序（例如用 sc create 直接把 nginx.exe 注册成服务，"
+           "而 nginx.exe 并未实现服务控制处理器）。建议改用 nginx -s stop，或直接结束 nginx.exe 进程。"),
+    1062: ("服务当前未启动，无需停止", "刷新列表即可。"),
+    1072: ("服务已被标记为删除，需重启后才会真正移除", "重启系统即可。"),
+    1052: ("该服务的控制请求被拒绝", "稍后重试，或改用 services.msc。"),
+    1053: ("服务在规定时间内没有响应控制请求", "进程可能已卡死，可结束对应进程。"),
+    1056: ("服务实例已在运行", "刷新列表即可。"),
+    1058: ("服务已被禁用，无法启动", "先把启动类型改为「自动」或「手动」再启动。"),
+    1059: ("服务配置了循环依赖，无法启动", "检查该服务的依赖配置。"),
+    1069: ("服务因登录失败而无法启动", "检查该服务的登录账户与密码。"),
+    1077: ("上次启动后服务配置未生效", "重启服务或重启系统。"),
+    1079: ("该服务配置的账户与同进程内其它服务不同", "调整服务的登录账户。"),
+}
+# SCM 明确无法控制进程时，允许回退到终止进程（常见：nginx.exe 这类“假服务”）
+FORCE_KILL_CODES = frozenset({5, 1053, 1061})
+
 
 def _pct(part, total):
     if total <= 0:
@@ -280,6 +311,50 @@ class Win32Backend(PlatformBackend):
         if action == "mode" and mode not in VALID_START_MODES:
             return {"success": False, "error": "无效的启动类型：" + str(mode), "name": name}
 
+        # ① 首选 PowerShell / ServiceController（可等待状态变化）
+        data = self._ps_service_action(name, action, mode)
+        if isinstance(data, dict) and data.get("success"):
+            data["name"] = name
+            self.services_snapshot(force=True)
+            return data
+        ps_err = (data or {}).get("error") or ""
+
+        # ② 回退 sc.exe：能拿到明确的 Win32 错误码，便于定位真实原因
+        ok, code, raw = self._sc_action(name, action, mode)
+        if ok:
+            self.services_snapshot(force=True)
+            return {"success": True, "name": name, "via": "sc.exe"}
+
+        if code:
+            reason, hint = SVC_ERROR_HINTS.get(
+                code, ("服务控制管理器拒绝了该操作",
+                       "可在管理员 PowerShell 中手动执行 sc.exe 核对。"))
+            reason = f"{reason}（Win32 错误 {code}）"
+        else:
+            reason = ps_err[:300] or (raw[:300] if raw else "未知错误")
+            hint = "若已用管理员身份运行仍失败，请改用 services.msc 或管理员 PowerShell 手动操作。"
+
+        # ③ 停止失败且 SCM 无法控制该进程（如用 sc create 注册的 nginx.exe），直接结束进程
+        if action == "stop" and code in FORCE_KILL_CODES:
+            pid = self._service_pid(name)
+            if pid and pid not in PROTECTED_PIDS and pid != SELF_PID:
+                killed = self.kill_pid(pid)
+                self.services_snapshot(force=True)
+                if killed.get("success"):
+                    return {"success": True, "name": name, "pid": pid, "forced": True,
+                            "message": f"服务控制管理器无法控制该进程，已强制结束进程 PID {pid}"}
+                hint += " 尝试强制结束进程同样失败：" + str(killed.get("error") or "")
+            else:
+                hint += " 未取到有效进程 PID，无法强制结束。"
+
+        if not self.is_admin():
+            hint = ("当前 OneKit 未以管理员身份运行（页面显示「受限模式」），"
+                    "请退出后右键「以管理员身份运行」再试。" + hint)
+        return {"success": False, "name": name, "error": reason, "hint": hint,
+                "code": code, "ps": ps_err[:300], "admin": self.is_admin()}
+
+    def _ps_service_action(self, name, action, mode=""):
+        """通过 PowerShell ServiceController 执行服务操作。"""
         safe = name.replace("'", "''")
         script = (
             "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
@@ -311,10 +386,46 @@ class Win32Backend(PlatformBackend):
         if not isinstance(data, dict):
             msg = (res.stderr or res.stdout or "未知错误").strip()
             return {"success": False, "error": msg[:500] or "未知错误", "name": name}
-        data["name"] = name
-        if data.get("success"):
-            self.services_snapshot(force=True)
         return data
+
+    def _sc_once(self, name, action, mode=""):
+        """执行单条 sc.exe 命令；返回 (是否成功, Win32 错误码, 原始输出)。"""
+        if action == "mode":
+            args = ["sc.exe", "config", name, "start=", SC_START_MODES[mode]]
+        else:
+            args = ["sc.exe", action, name]
+        res = _run(args, timeout=45, **PS_GBK)
+        if res is None:
+            return False, 0, "sc.exe 执行超时"
+        raw = ((res.stdout or "") + "\n" + (res.stderr or "")).strip()
+        m = re.search(r"FAILED\s+(\d+)", raw)
+        code = int(m.group(1)) if m else 0
+        if res.returncode == 0 and code == 0:
+            return True, 0, raw
+        if code == 0 and res.returncode > 0:
+            code = res.returncode
+        return False, code, raw
+
+    def _sc_action(self, name, action, mode=""):
+        """sc.exe 版服务操作（restart 拆成 stop + start）。"""
+        if action == "restart":
+            ok, code, raw = self._sc_once(name, "stop")
+            if not ok:
+                return ok, code, raw
+            time.sleep(1.0)
+            return self._sc_once(name, "start")
+        return self._sc_once(name, action, mode)
+
+    def _service_pid(self, name):
+        """读取服务当前进程 PID（sc queryex），失败返回 0。"""
+        res = _run(["sc.exe", "queryex", name], timeout=15, **PS_GBK)
+        if res is None:
+            return 0
+        m = re.search(r"PID\s*:\s*(\d+)", res.stdout or "")
+        try:
+            return int(m.group(1))
+        except (AttributeError, TypeError, ValueError):
+            return 0
 
     # ── 磁盘 ──────────────────────────────────────────────────
 

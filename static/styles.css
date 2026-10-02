@@ -32,6 +32,7 @@
   .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 32px 22px 60px; }
 
   header { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  #adminBadge { margin-left: auto; flex: none; cursor: default; font-size: 12.5px; }
   .logo {
     width: 46px; height: 46px; border-radius: 13px; flex: none;
     background: linear-gradient(135deg, var(--accent), var(--accent2));
@@ -154,7 +155,7 @@
   /* toast */
   #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; transition: 0.25s; z-index: 60; }
   #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
-  #toast .box { background: #1c2230; border: 1px solid var(--panel-border); color: var(--text); padding: 12px 18px; border-radius: 11px; box-shadow: var(--shadow); font-size: 13px; display: flex; gap: 9px; align-items: center; max-width: 80vw; }
+  #toast .box { background: #1c2230; border: 1px solid var(--panel-border); color: var(--text); padding: 12px 18px; border-radius: 11px; box-shadow: var(--shadow); font-size: 13px; display: flex; gap: 9px; align-items: center; max-width: 80vw; white-space: pre-line; line-height: 1.6; }
   #toast .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   #toast.ok .dot { background: var(--ok); }
   #toast.warn .dot { background: var(--warn); }

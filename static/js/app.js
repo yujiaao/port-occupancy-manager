@@ -1,7 +1,7 @@
 // 应用入口：Tab 切换、懒加载各视图数据。
 // 各视图模块在加载时已自行绑定事件并发起初始请求（端口、内存监控），
 // 服务 / 磁盘视图则在此处按需懒加载（首次切到该 Tab 才请求）。
-import { $, state } from "./common.js";
+import { $, state, initAdminBadge } from "./common.js";
 import { fetchPorts } from "./ports.js";
 import { sysTick, drawChart } from "./sysmon.js";
 import { fetchServices } from "./services.js";
@@ -40,6 +40,9 @@ function switchView(v) {
   else if (v === "cert") { loadCert(); }
   else { requestAnimationFrame(drawChart); if (!state.memLoaded) sysTick(); }
 }
+
+// 全局「运行模式」徽章：页面加载即检测，并每 30 秒刷新一次
+initAdminBadge();
 
 $("tabs").addEventListener("click", (e) => {
   const b = e.target.closest(".tab");

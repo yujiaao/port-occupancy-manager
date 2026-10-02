@@ -30,6 +30,7 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
+    uac_admin=True,  # 双击即申请管理员（UAC 提权），服务启停等提权操作才可用
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
