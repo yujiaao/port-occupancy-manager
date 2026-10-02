@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OneKit · 端口被占时，别再翻 netstat</title>
+<meta name="description" content="OneKit 是零依赖的本地运维工具。查看端口占用并结束进程、监控提交空间、启停服务、清理磁盘，数据只留在本机。Windows 与 macOS 双击即用。">
+<meta property="og:title" content="OneKit · 本地系统工具箱">
+<meta property="og:description" content="端口、内存、服务、磁盘，一个本地页面看完。数据不出这台机器。">
+<meta property="og:image" content="preview.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23161412'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23e2a23a'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #12110f;
+    --bg-2: #1b1916;
+    --ink: #f3efe6;
+    --muted: #a3998c;
+    --line: rgba(243, 239, 230, 0.14);
+    --amber: #e2a23a;
+    --amber-ink: #1a140c;
+    --radius: 12px;
+    --nav: 64px;
+    --max: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Avenir Next", "PingFang SC", "Segoe UI", sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+  }
+  a { color: inherit; }
+  img { max-width: 100%; display: block; }
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    height: var(--nav);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    background: rgba(18, 17, 15, 0.92);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    text-decoration: none;
+  }
+  .brand i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    vertical-align: 1px;
+  }
+  .nav-links { display: flex; gap: 22px; align-items: center; }
+  .nav-links a { text-decoration: none; color: var(--muted); font-size: 15px; }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-links .go {
+    color: var(--amber-ink);
+    background: var(--amber);
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    font-weight: 650;
+  }
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.9fr) 1.15fr;
+    gap: 48px;
+    align-items: center;
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 56px 28px 28px;
+  }
+  .kicker {
+    margin: 0 0 14px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(36px, 4.6vw, 56px);
+    line-height: 1.12;
+    letter-spacing: -0.045em;
+    font-weight: 750;
+  }
+  .lede {
+    margin: 18px 0 0;
+    max-width: 36ch;
+    color: var(--muted);
+    font-size: 18px;
+  }
+  .actions { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 46px;
+    padding: 0 18px;
+    border-radius: var(--radius);
+    text-decoration: none;
+    font-weight: 650;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--amber); color: var(--amber-ink); }
+  .btn-ghost { border-color: var(--line); color: var(--ink); }
+  .shot {
+    margin: 0;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: #0c0e14;
+  }
+  .shot img { width: 100%; height: auto; }
+  .shot figcaption {
+    padding: 10px 14px 12px;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  section { max-width: var(--max); margin: 0 auto; padding: 72px 28px; scroll-margin-top: 76px; }
+  h2 {
+    margin: 0 0 28px;
+    font-size: clamp(28px, 3vw, 40px);
+    letter-spacing: -0.04em;
+    line-height: 1.15;
+  }
+  .scenes {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 1fr;
+    border-top: 1px solid var(--line);
+  }
+  .scenes article {
+    padding: 28px 24px 8px 0;
+    border-right: 1px solid var(--line);
+  }
+  .scenes article:last-child { border-right: 0; padding-right: 0; padding-left: 24px; }
+  .scenes article:nth-child(2) { padding-left: 24px; }
+  .num {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--amber);
+    font-size: 13px;
+  }
+  .scenes h3, .cap h3, .get h3 { margin: 8px 0 8px; font-size: 20px; letter-spacing: -0.03em; }
+  .scenes p, .cap p, .get p, .bound p { margin: 0; color: var(--muted); }
+  .board {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 14px;
+  }
+  .cap {
+    background: var(--bg-2);
+    border-radius: var(--radius);
+    padding: 22px 22px 20px;
+    border: 1px solid var(--line);
+  }
+  .cap.wide { grid-row: 1 / span 2; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .cap.wide img { flex: 1; object-fit: cover; min-height: 220px; }
+  .cap.wide div { padding: 18px 22px 20px; }
+  .cap ul { margin: 12px 0 0; padding: 0; list-style: none; color: var(--ink); }
+  .cap li { padding: 7px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  .get {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    border-top: 1px solid var(--line);
+  }
+  .get article { padding: 22px 22px 8px 0; }
+  .get article + article { padding-left: 22px; border-left: 1px solid var(--line); }
+  .get a.file {
+    display: inline-block;
+    margin-top: 16px;
+    color: var(--amber);
+    font-weight: 650;
+    text-underline-offset: 3px;
+  }
+  .bound {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 28px;
+    padding-top: 8px;
+  }
+  .bound strong { display: block; margin-bottom: 6px; letter-spacing: -0.02em; }
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 22px 28px 36px;
+    max-width: var(--max);
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  footer a { color: var(--ink); }
+  @media (max-width: 860px) {
+    .nav { padding: 0 16px; }
+    .nav-links a:not(.go) { display: none; }
+    .hero, .scenes, .board, .get, .bound {
+      grid-template-columns: 1fr;
+      gap: 22px;
+    }
+    .hero { min-height: auto; padding: 28px 16px 48px; }
+    h1 { max-width: none; }
+    section { padding: 56px 16px; }
+    .scenes article, .scenes article:nth-child(2), .scenes article:last-child,
+    .get article, .get article + article {
+      border: 0;
+      padding: 18px 0;
+      border-top: 1px solid var(--line);
+    }
+    .cap.wide { grid-row: auto; }
+    footer { flex-direction: column; padding: 22px 16px 40px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+<header class="nav">
+  <a class="brand" href="#top"><i></i>OneKit</a>
+  <nav class="nav-links" aria-label="页内">
+    <a href="#scenes">场景</a>
+    <a href="#caps">能力</a>
+    <a href="#download" class="go">下载</a>
+  </nav>
+</header>
+
+<main id="top">
+  <div class="hero">
+    <div>
+      <p class="kicker">本地系统工具箱</p>
+      <h1>端口被占时，<br>别再翻 netstat。</h1>
+      <p class="lede">一个页面看完端口、内存、服务和磁盘。数据不出这台机器。</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="#download">下载</a>
+        <a class="btn btn-ghost" href="https://github.com/yujiaao/port-occupancy-manager">源码</a>
+      </div>
+    </div>
+    <figure class="shot">
+      <img src="preview.png" width="1376" height="864" alt="OneKit 端口占用页：连接统计、搜索，以及按端口终止进程">
+      <figcaption>127.0.0.1:8765 · 端口占用</figcaption>
+    </figure>
+  </div>
+
+  <section id="scenes">
+    <h2>三件平时要开好几个窗口的事。</h2>
+    <div class="scenes">
+      <article>
+        <div class="num">01</div>
+        <h3>Address already in use</h3>
+        <p>netstat 看得到端口，taskkill 才杀得掉进程。这里按端口号一次列出占用者，确认后结束整棵进程树。</p>
+      </article>
+      <article>
+        <div class="num">02</div>
+        <h3>提交空间见底</h3>
+        <p>页面文件耗尽时，IDE 会在毫无预兆的情况下崩。监控和崩溃日志里的 AvailPageFile 是同一套数字。</p>
+      </article>
+      <article>
+        <div class="num">03</div>
+        <h3>磁盘红了才发现</h3>
+        <p>临时文件、包缓存、大文件分开列。默认只勾缓存类，删除前再确认一次，不进回收站。</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="caps">
+    <h2>十一个工具，分成看系统、查文件、做转换。</h2>
+    <div class="board">
+      <article class="cap wide">
+        <img src="preview.png" alt="" width="1376" height="864">
+        <div>
+          <h3>看这台机器</h3>
+          <p>端口占用、提交空间趋势、Windows 服务启停、磁盘容量和垃圾清理。危险操作都要再点一次确认。</p>
+        </div>
+      </article>
+      <article class="cap">
+        <h3>在目录里找字</h3>
+        <p>递归搜代码和文本，跳过 .git、压缩包和二进制。结果按代码、配置、其他文本分组。只读，不改文件。</p>
+      </article>
+      <article class="cap">
+        <h3>留在浏览器里的转换</h3>
+        <ul>
+          <li>JWT 解码，可选本地验签</li>
+          <li>JSON 格式化、压缩、校验</li>
+          <li>时间戳、Base64、UTF-8 转义</li>
+          <li>直连读取 HTTPS 证书</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section id="download">
+    <h2>双击打开，浏览器进本机页面。</h2>
+    <div class="get">
+      <article>
+        <h3>Windows</h3>
+        <p>单个 OneKit.exe。第一次会请求管理员权限，同意后打开 127.0.0.1:8765。取消授权则程序不启动。</p>
+        <a class="file" href="https://github.com/yujiaao/port-occupancy-manager/raw/main/dist/OneKit.exe">下载 OneKit.exe</a>
+      </article>
+      <article>
+        <h3>macOS</h3>
+        <p>解压后双击 OneKit.app。若被拦截，在 Finder 里右键该应用再选「打开」。操作系统服务需要 sudo。</p>
+        <a class="file" href="https://github.com/yujiaao/port-occupancy-manager/raw/main/dist/OneKit-macos.zip">下载 OneKit-macos.zip</a>
+      </article>
+      <article>
+        <h3>源码</h3>
+        <p>Python 3.8+，标准库，没有第三方包。运行 python server.py，同一地址。</p>
+        <a class="file" href="https://github.com/yujiaao/port-occupancy-manager">github.com/yujiaao/port-occupancy-manager</a>
+      </article>
+    </div>
+  </section>
+
+  <section id="bound">
+    <h2>只绑定本机，不上传。</h2>
+    <div class="bound">
+      <p><strong>127.0.0.1</strong>服务不监听外网。JWT、JSON、时间戳这些转换在浏览器里完成。</p>
+      <p><strong>不碰关键进程</strong>拒绝结束 PID 0、PID 4 和工具自己。受保护的系统服务按钮是灰的，后端也会拒绝。</p>
+      <p><strong>MIT</strong>仓库公开。Windows 与 macOS 安装包放在 dist，需要 Python 时直接拉源码。</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span>OneKit · 端口占用、内存、服务、磁盘</span>
+  <a href="https://github.com/yujiaao/port-occupancy-manager">源码与更新</a>
+</footer>
+</body>
+</html>

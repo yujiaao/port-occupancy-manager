@@ -2,6 +2,8 @@
 
 > 一个零依赖的本地运维小工具，十一个 Tab 一站式：**端口占用查看与进程终止**、**Windows 服务启停**、**系统内存（提交空间）监控报警**、**磁盘容量监控与垃圾清理**、**本地代码/文本搜索**、**JWT 解密**、**JSON 格式化**、**时间戳转换**、**Base64 编解码**、**UTF-8 转义**、**HTTPS 证书检测**。双击即用，玻璃拟态深色 UI，所有危险操作全程二次确认。
 
+宣传站：<https://yujiaao.github.io/port-occupancy-manager/>（源文件在 [`site/`](site/index.html)）。
+
 [![Release](https://img.shields.io/github/v/release/yujiaao/onekit)](https://github.com/yujiaao/onekit/releases/tag/v1.0.0)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)](https://www.apple.com/macos)
