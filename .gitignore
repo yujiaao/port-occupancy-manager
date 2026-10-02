@@ -3,10 +3,12 @@ build/
 __pycache__/
 *.pyc
 .env
+.venv/
 
-# 发布产物：保留单文件 exe 作为可下载发布物
+# 发布产物：保留 Windows exe 与 macOS 压缩包作为可下载发布物
 dist/*
 !dist/OneKit.exe
+!dist/OneKit-macos.zip
 
 # 运行时产物：每次搜索都会变化，且含本机绝对路径
 port_inspector_search_history.json

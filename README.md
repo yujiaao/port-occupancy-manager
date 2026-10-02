@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/yujiaao/onekit)](https://github.com/yujiaao/onekit/releases/tag/v1.0.0)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org)
-[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)](https://www.microsoft.com/windows)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)](https://www.apple.com/macos)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ## 为什么需要它
@@ -133,7 +133,29 @@ OneKit.exe --no-browser  # 不自动打开浏览器
 
 > **从源码运行（方式二）时**没有内嵌提权清单：需要服务启停等管理员功能，请在该终端**以管理员身份运行 `python server.py`**；普通身份启动则进入「受限模式」，只能查看列表，启停会被系统拒绝（Access denied）。
 
-### 方式二：从源码运行（需 Python 3.8+）
+### 方式二：macOS 应用（双击即用）
+
+1. 使用仓库里的 `dist/OneKit-macos.zip`，或在本机执行：
+
+```bash
+python3 -m pip install pyinstaller
+python3 -m PyInstaller OneKit-macos.spec --noconfirm
+codesign --force --deep --sign - dist/OneKit.app
+```
+
+2. 双击 `dist/OneKit.app`。浏览器会打开 <http://127.0.0.1:8765>
+   - 第一次若被系统拦截：在 Finder 中右键该 App →「打开」
+   - 退出：程序坞里的 OneKit 图标上右键「退出」，或在终端按 Ctrl+C（若从终端启动）
+3. 命令行参数（直接运行包内可执行文件）：
+
+```bash
+dist/OneKit.app/Contents/MacOS/OneKit 9000
+dist/OneKit.app/Contents/MacOS/OneKit --no-browser
+```
+
+普通用户可以查看端口、内存、磁盘和自己的 launchd 服务。结束其他用户的进程，或操作系统服务，需要 `sudo` 启动。
+
+### 方式三：从源码运行（需 Python 3.8+）
 
 ```bash
 git clone https://github.com/yujiaao/onekit.git
@@ -303,7 +325,7 @@ RPC、LSASS、Winlogon、WMI（`Winmgmt`）这类关键服务被列入保护名�
 浏览器要求先有用户交互才允许播放声音，请在页面上点一下；系统通知需要点击页面上的「启用系统通知」并允许权限。页面内弹窗不受影响。
 
 **Q：支持 macOS / Linux 吗？**
-后端已为 Unix 预留 `lsof` 兼容路径（端口功能），服务与内存监控为 Windows 实现。主测试环境为 Windows，欢迎提交 PR 完善跨平台支持。
+支持 macOS。端口走 `lsof`，内存走 `vm_stat` / `sysctl`（页面上的「提交空间」在 Mac 上显示为交换空间），服务走 `launchctl`，磁盘走 `df`。双击运行使用 `OneKit.app`。Linux 复用同一套 Unix 命令，但没有单独打包。
 
 ## 许可证
 

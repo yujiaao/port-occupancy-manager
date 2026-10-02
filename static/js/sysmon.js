@@ -147,23 +147,48 @@ function predict() {
   if (!isFinite(minLeft)) return null;
   return { minLeft: Math.max(0, Math.round(minLeft)), gbPerMin: -a * 60 };
 }
+function commitWord(m) {
+  return m && m.profile === "posix" ? "交换空间" : "提交空间";
+}
+let posixCopyApplied = false;
+function applyPosixCopy() {
+  if (posixCopyApplied) return;
+  posixCopyApplied = true;
+  const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+  set("lblCommitK", "交换空间占用（Swap）");
+  set("lblAvailK", "交换空间剩余");
+  set("lblGaugeSub", "交换空间见底时，系统会开始压缩内存并显著变慢");
+  set("lblGaugeCommit", "交换空间占用");
+  set("lblGaugeLoad", "物理内存占用");
+  set("lblLegendCommit", "交换剩余");
+  set("lblDetailSub", "vm_stat / sysctl，交换空间对应活动监视器里的 Swap");
+  set("lblTopSub", "按常驻内存 RSS 排序");
+  set("thCommit", "常驻内存");
+  set("thPeak", "峰值");
+  set("thShare", "占物理内存");
+  const note = $("memNote");
+  if (note) {
+    note.innerHTML = "macOS 没有 Windows 的提交空间。这里用<b>交换空间（Swap）</b>对应原「提交」指标，物理内存来自 vm_stat。<br/>交换剩余过低或物理内存吃紧时，系统会压缩内存、风扇变响、应用变卡。可在活动监视器中按内存排序结束大户进程。";
+  }
+}
 function sysEvaluate(m) {
   const reasons = { warn: [], crit: [] };
   const c = m.commit, p = m.physical;
   const hasCommit = c.total > 0;
+  const word = commitWord(m);
   const availGb = c.avail / GB, physGb = p.avail / GB;
   if (hasCommit) {
-    if (c.usedPct >= S.critCommitPct) reasons.crit.push("提交空间占用已达 " + c.usedPct + "%（>=" + S.critCommitPct + "%），已接近上限");
-    else if (c.usedPct >= S.warnCommitPct) reasons.warn.push("提交空间占用 " + c.usedPct + "%（>=" + S.warnCommitPct + "%）");
-    if (availGb <= S.critAvailGb) reasons.crit.push("提交空间剩余仅 " + fmtSmart(c.avail) + "（<" + S.critAvailGb + "GB），Windows 上任何进程申请内存都可能失败");
-    else if (availGb <= S.warnAvailGb) reasons.warn.push("提交空间剩余 " + fmtSmart(c.avail) + "（<" + S.warnAvailGb + "GB）");
+    if (c.usedPct >= S.critCommitPct) reasons.crit.push(word + "占用已达 " + c.usedPct + "%（>=" + S.critCommitPct + "%），已接近上限");
+    else if (c.usedPct >= S.warnCommitPct) reasons.warn.push(word + "占用 " + c.usedPct + "%（>=" + S.warnCommitPct + "%）");
+    if (availGb <= S.critAvailGb) reasons.crit.push(word + "剩余仅 " + fmtSmart(c.avail) + "（<" + S.critAvailGb + "GB）" + (m.profile === "posix" ? "，系统可能开始大量换页" : "，Windows 上任何进程申请内存都可能失败"));
+    else if (availGb <= S.warnAvailGb) reasons.warn.push(word + "剩余 " + fmtSmart(c.avail) + "（<" + S.warnAvailGb + "GB）");
   }
   if (physGb <= S.critPhysGb) reasons.crit.push("物理内存剩余仅 " + fmtSmart(p.avail) + "（<" + S.critPhysGb + "GB）");
   else if (physGb <= S.warnPhysGb) reasons.warn.push("物理内存剩余 " + fmtSmart(p.avail) + "（<" + S.warnPhysGb + "GB）");
   const pred = predict();
   if (S.predict && pred) {
-    if (pred.minLeft <= S.predictCritMin) reasons.crit.push("按近 8 分钟下降趋势，提交空间约 " + pred.minLeft + " 分钟后耗尽");
-    else if (pred.minLeft <= S.predictWarnMin) reasons.warn.push("按趋势推算约 " + pred.minLeft + " 分钟后提交空间将耗尽");
+    if (pred.minLeft <= S.predictCritMin) reasons.crit.push("按近 8 分钟下降趋势，" + word + "约 " + pred.minLeft + " 分钟后耗尽");
+    else if (pred.minLeft <= S.predictWarnMin) reasons.warn.push("按趋势推算约 " + pred.minLeft + " 分钟后" + word + "将耗尽");
   }
   return { level: reasons.crit.length ? "crit" : (reasons.warn.length ? "warn" : "ok"), warn: reasons.warn, crit: reasons.crit, pred };
 }
@@ -171,18 +196,24 @@ function sysEvaluate(m) {
 // ---------- 报警 ----------
 function fireAlarm(ev) {
   const c = metrics && metrics.commit;
-  const big = ((metrics && metrics.top) || []).filter((x) => c && c.total > 0 && x.commit / c.total >= 0.05).slice(0, 3);
+  const posix = metrics && metrics.profile === "posix";
+  const base = posix && metrics.physical ? metrics.physical.total : (c && c.total);
+  const big = ((metrics && metrics.top) || []).filter((x) => base > 0 && x.commit / base >= 0.05).slice(0, 3);
   const reasons = (ev.crit && ev.crit.length) ? ev.crit : (ev.warn || []);
-  let html = "<p>系统即将/已经到达内存上限，继续放任可能复现「native 内存分配失败 → 应用崩溃」。</p>";
+  let html = posix
+    ? "<p>交换空间或物理内存已经很紧，系统会压缩内存并开始变慢。</p>"
+    : "<p>系统即将/已经到达内存上限，继续放任可能复现「native 内存分配失败 → 应用崩溃」。</p>";
   html += "<ul>" + reasons.map((r) => "<li>" + esc(r) + "</li>").join("") + "</ul>";
   if (big.length) {
     html += "<p>当前较大的内存占用进程：</p><ul>";
-    big.forEach((x) => html += "<li>" + esc(x.name || "未知进程") + " (PID " + x.pid + ") 提交 " + fmtB(x.commit) + "</li>");
+    big.forEach((x) => html += "<li>" + esc(x.name || "未知进程") + " (PID " + x.pid + ") " + (posix ? "常驻 " : "提交 ") + fmtB(x.commit) + "</li>");
     html += "</ul>";
   }
-  html += '<div class="tip">建议：立即保存工作 → 切换到「端口占用」页或任务管理器按“提交大小”排序找元凶（vmmem / Docker / 浏览器）→ 必要时重启电脑，并把虚拟内存改为“系统管理的大小”。</div>';
+  html += posix
+    ? '<div class="tip">建议：先保存工作，再到「端口占用」或活动监视器里结束占内存的大户（浏览器、Docker、IDE）。macOS 会按需扩大交换文件，但磁盘空间也会被吃掉。</div>'
+    : '<div class="tip">建议：立即保存工作 → 切换到「端口占用」页或任务管理器按“提交大小”排序找元凶（vmmem / Docker / 浏览器）→ 必要时重启电脑，并把虚拟内存改为“系统管理的大小”。</div>';
   $("alertBody").innerHTML = html;
-  if (ev.level === "crit") $("alertTitle").textContent = "⚠ 严重告警：提交空间（页面文件）即将耗尽";
+  if (ev.level === "crit") $("alertTitle").textContent = posix ? "⚠ 严重告警：交换空间即将用尽" : "⚠ 严重告警：提交空间（页面文件）即将耗尽";
   else { $("alertTitle").textContent = "⚠ 内存预警"; $("alertTitle").style.color = "var(--warn)"; }
   if (S.popup) $("alertModal").classList.add("show");
   activeCrit = true;
@@ -229,7 +260,9 @@ function renderAll() {
 
   $("cardCommit").classList.toggle("hot", commitHot);
   $("st-commitPct").textContent = hasCommit ? c.usedPct + "%" : "--";
-  $("st-commitSub").textContent = hasCommit ? "已提交 " + fmtSmart(c.used) + " / 上限 " + fmtSmart(c.total) : "未检测到页面文件配置";
+  $("st-commitSub").textContent = hasCommit
+    ? (metrics.profile === "posix" ? "已用 " : "已提交 ") + fmtSmart(c.used) + " / 上限 " + fmtSmart(c.total)
+    : (metrics.profile === "posix" ? "当前没有交换文件" : "未检测到页面文件配置");
   $("barCommit").style.width = (hasCommit ? Math.min(100, c.usedPct) : 0) + "%";
   $("barCommit").style.background = commitHot ? "var(--danger)" : "";
 
@@ -266,15 +299,16 @@ function renderAll() {
 
 function renderKV() {
   const m = metrics, c = m.commit, p = m.physical, v = m.virtual, os = m.os || {};
+  const posix = m.profile === "posix";
   const rows = [
     ["物理内存 总量", fmtB(p.total)],
     ["物理内存 已用", fmtB(p.used) + "（" + p.usedPct + "%）"],
     ["物理内存 可用", fmtB(p.avail), p.avail < S.warnPhysGb * GB],
     ["", ""],
-    ["提交空间上限 Commit limit", fmtB(c.total)],
-    ["已提交 commit charge", fmtB(c.used)],
-    ["剩余可提交 AvailPageFile", fmtB(c.avail), c.total > 0 && c.avail <= S.critAvailGb * GB],
-    ["提交占用率", c.total > 0 ? c.usedPct + "%" : "--"],
+    [posix ? "交换空间上限" : "提交空间上限 Commit limit", fmtB(c.total)],
+    [posix ? "已用交换空间" : "已提交 commit charge", fmtB(c.used)],
+    [posix ? "剩余交换空间" : "剩余可提交 AvailPageFile", fmtB(c.avail), c.total > 0 && c.avail <= S.critAvailGb * GB],
+    [posix ? "交换占用率" : "提交占用率", c.total > 0 ? c.usedPct + "%" : "--"],
     ["", ""],
     ["内存负载 Memory Load", m.memoryLoad + "%"],
     ["虚拟内存(进程地址)可用", fmtB(v.avail)],
@@ -300,14 +334,17 @@ function renderTop() {
   if (!top || !top.length) {
     $("topBody").innerHTML = "";
     $("topEmpty").style.display = "block";
-    $("topEmpty").textContent = "暂无进程数据（PowerShell 被禁用或非 Windows）";
+    $("topEmpty").textContent = metrics && metrics.profile === "posix"
+      ? "暂无进程数据" : "暂无进程数据（PowerShell 被禁用或非 Windows）";
     return;
   }
   const sig = JSON.stringify(top);
   if (sig === topSig) return;   // 进程表每 15s 才变化，避免高频重绘
   topSig = sig;
   $("topEmpty").style.display = "none";
-  const total = (metrics.commit && metrics.commit.total) || 0;
+  const total = metrics.profile === "posix"
+    ? ((metrics.physical && metrics.physical.total) || 0)
+    : ((metrics.commit && metrics.commit.total) || 0);
   let html = "";
   top.slice(0, 20).forEach((x, i) => {
     const share = total > 0 ? (x.commit / total * 100) : 0;
@@ -319,7 +356,7 @@ function renderTop() {
         <span class="nm" title="${esc(name)}">${esc(name)}</span>
         <span class="pid">PID ${x.pid}</span></div></td>
       <td class="mb">${fmtB(x.commit)}</td>
-      <td class="mb">${fmtB(x.peak)}</td>
+      <td class="mb">${x.peak ? fmtB(x.peak) : "—"}</td>
       <td class="mb">${fmtB(x.ws)}</td>
       <td class="mb">${total > 0 ? share.toFixed(1) + "%" : "--"}</td></tr>`;
   });
@@ -388,10 +425,11 @@ export async function sysTick() {
     if (lastTick && now - lastTick > 45000) mHistory = [];   // 断流恢复，丢弃旧趋势
     lastTick = now;
     if (!d.ok) {
-      setStatus("off", "数据源不可用", d.reason || "采集失败", "仅支持 Windows 环境。");
+      setStatus("off", "数据源不可用", d.reason || "采集失败", d.profile === "posix" ? "请确认可以执行 vm_stat / sysctl。" : "仅支持 Windows 环境。");
       return;
     }
     metrics = d;
+    if (d.profile === "posix") applyPosixCopy();
     state.memLoaded = true;
     mHistory.push({ t: now, ca: d.commit.avail, pa: d.physical.avail });
     if (mHistory.length > MAX_POINTS) mHistory.shift();
@@ -412,12 +450,13 @@ function applyLevel(ev) {
   const isCrit = ev.level === "crit", isWarn = ev.level === "warn";
   const now = Date.now();
   const reasonTop = ev.crit[0] || ev.warn[0] || "";
+  const posix = metrics && metrics.profile === "posix";
   if (isCrit) {
-    setStatus("crit", "严重：提交空间（页面文件）即将耗尽，可能复现进程崩溃", reasonTop || "内存异常，请尽快处理", TIP_CRIT);
+    setStatus("crit", posix ? "严重：交换空间即将用尽，系统可能明显变慢" : "严重：提交空间（页面文件）即将耗尽，可能复现进程崩溃", reasonTop || "内存异常，请尽快处理", posix ? "建议结束占内存的大户进程，或腾出磁盘空间让系统继续换页。" : TIP_CRIT);
     if (!activeCrit && now >= snoozeUntil) { activeCrit = true; fireAlarm(ev); }
     else if (now < snoozeUntil) startTitleFlash();
   } else if (isWarn) {
-    setStatus("warn", "内存吃紧，请留意提交空间剩余", reasonTop || "", TIP_WARN);
+    setStatus("warn", posix ? "内存吃紧，请留意交换空间和物理内存剩余" : "内存吃紧，请留意提交空间剩余", reasonTop || "", TIP_WARN);
     activeCrit = false;
     stopTitleFlash();
     if (ev.warn.length && prevLevel !== "warn") toast("预警：" + ev.warn[0], "warn");
@@ -430,8 +469,9 @@ function applyLevel(ev) {
 }
 function buildOkDesc() {
   const c = metrics.commit;
-  if (!c || c.total <= 0) return "提交空间数据不可用";
-  return "提交空间剩余 " + fmtSmart(c.avail) + "，占用 " + c.usedPct + "%；物理内存剩余 " + fmtSmart(metrics.physical.avail) + "。";
+  const word = commitWord(metrics);
+  if (!c || c.total <= 0) return word + "数据不可用";
+  return word + "剩余 " + fmtSmart(c.avail) + "，占用 " + c.usedPct + "%；物理内存剩余 " + fmtSmart(metrics.physical.avail) + "。";
 }
 export function restartSysTimer() {
   if (sysTimer) clearInterval(sysTimer);

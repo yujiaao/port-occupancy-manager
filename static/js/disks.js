@@ -28,6 +28,12 @@ export async function fetchDisks() {
     state.disksLoaded = true;
     $("diskBadge").className = "badge " + (d.ok === false ? "st-warn" : "st-ok");
     $("diskBadgeTxt").textContent = d.ok === false ? "获取失败" : disks.length + " 个分区";
+    const hint = $("diskSourceHint");
+    if (hint && d.platform === "Darwin") {
+      hint.textContent = "容量来自 df。数据卷反映实际可用空间；系统卷是只读快照，占用比例不代表整块磁盘。";
+    } else if (hint && d.platform === "Linux") {
+      hint.textContent = "容量来自 df，与系统磁盘工具一致。";
+    }
     renderDisks();
     if (d.ok === false) toast("获取磁盘信息失败：" + (d.error || "未知原因"), false);
   } catch (e) {
@@ -45,10 +51,13 @@ function renderDisks() {
       : pct >= 90 ? "var(--danger)" : pct >= 75 ? "var(--warn)" : "var(--ok)";
     const card = document.createElement("div");
     card.className = "disk";
+    const shortDrive = /^[A-Za-z]:\\?$/.test(d.drive);
+    const title = shortDrive ? d.drive.replace(/\\/g, "") : (d.label || d.drive);
+    const subName = shortDrive ? (d.label || d.drive) : d.drive;
     card.innerHTML =
       '<div class="dh"><div class="dl"' + (ready ? '' : ' style="opacity:.55"') + '>' +
-          esc(d.drive.replace("\\", "")) + '</div>' +
-        '<div style="min-width:0"><div class="dt">' + esc(d.label || d.drive) + '</div>' +
+          esc(title) + '</div>' +
+        '<div style="min-width:0"><div class="dt">' + esc(subName) + '</div>' +
         '<div class="ds">' + esc(d.type) + ' · ' + esc(d.fs || (ready ? "—" : "未就绪")) + '</div></div>' +
         '<div class="dp" style="color:' + color + '">' + (ready ? pct + "%" : "—") + '</div></div>' +
       '<div class="dbar"><i style="width:' + (ready ? Math.min(100, pct) : 0) +

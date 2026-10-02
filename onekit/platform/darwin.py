@@ -34,6 +34,44 @@ def _run(args, timeout=20, encoding=None, errors="replace"):
 
 _IS_MACOS = sys.platform == "darwin"
 
+# 结束这些进程会直接让图形会话或本工具失效
+_CRITICAL_PROCS = {"launchd", "kernel_task", "WindowServer", "loginwindow"}
+_MAC_PROTECTED_SERVICES = {
+    "com.apple.WindowServer",
+    "com.apple.loginwindow",
+    "com.apple.Dock",
+    "com.apple.SystemUIServer",
+    "com.apple.Finder",
+    "com.apple.coreservicesd",
+    "com.apple.cfprefsd",
+}
+# df 里这些挂载点是系统内部卷，不作为用户磁盘展示
+_SKIP_MOUNTS = {
+    "/dev",
+    "/System/Volumes/Preboot",
+    "/System/Volumes/VM",
+    "/System/Volumes/Update",
+    "/System/Volumes/iSCPreboot",
+    "/System/Volumes/xarts",
+    "/System/Volumes/Hardware",
+}
+
+
+def _page_size():
+    out = _run(["sysctl", "-n", "hw.pagesize"], timeout=5)
+    if out and out.stdout.strip().isdigit():
+        return int(out.stdout.strip())
+    return 4096
+
+
+def _parse_swap_field(text, key):
+    m = re.search(rf"{key}\s*=\s*([\d.]+)\s*(\w+)", text or "")
+    if not m:
+        return 0
+    val, unit = float(m.group(1)), m.group(2).lower()
+    mult = {"g": 1 << 30, "m": 1 << 20, "k": 1 << 10}.get(unit[:1], 1)
+    return int(val * mult)
+
 
 class DarwinBackend(PlatformBackend):
     """macOS / Linux 平台实现。"""
@@ -46,8 +84,8 @@ class DarwinBackend(PlatformBackend):
         return self._linux_memory()
 
     def _macos_memory(self):
-        """macOS: vm_stat + sysctl hw.memsize。"""
-        page_size = 4096
+        """macOS: vm_stat + sysctl。页面大小随架构变化（Intel 4K / Apple 芯片 16K）。"""
+        page_size = _page_size()
         out = _run(["sysctl", "-n", "hw.memsize"], timeout=5)
         if out is None or not out.stdout.strip():
             return None
@@ -65,30 +103,27 @@ class DarwinBackend(PlatformBackend):
             if m:
                 stats[m.group(1).strip()] = int(m.group(2))
 
-        free = stats.get("Pages free", 0) * page_size
-        inactive = stats.get("Pages inactive", 0) * page_size
-        avail_phys = free + inactive
+        def pages(*names):
+            return sum(stats.get(n, 0) for n in names) * page_size
+
+        # 与活动监视器「可用内存」接近：空闲 + 非活跃 + 投机 + 可清除
+        avail_phys = pages("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable")
+        avail_phys = min(avail_phys, total_phys)
         used_phys = max(0, total_phys - avail_phys)
 
-        # macOS 没有 commit limit 概念，用 swap 代替
         swap_out = _run(["sysctl", "-n", "vm.swapusage"], timeout=5)
-        swap_total = swap_avail = 0
-        if swap_out and swap_out.stdout:
-            m = re.search(r"total\s*=\s*([\d.]+)\s*(\w+)", swap_out.stdout)
-            if m:
-                val, unit = float(m.group(1)), m.group(2).lower()
-                mult = {"g": 1 << 30, "m": 1 << 20, "k": 1 << 10}.get(unit[0], 1)
-                swap_total = int(val * mult)
-            m2 = re.search(r"avail\s*=\s*([\d.]+)\s*(\w+)", swap_out.stdout)
-            if m2:
-                val, unit = float(m2.group(1)), m2.group(2).lower()
-                mult = {"g": 1 << 30, "m": 1 << 20, "k": 1 << 10}.get(unit[0], 1)
-                swap_avail = int(val * mult)
+        swap_text = swap_out.stdout if swap_out else ""
+        swap_total = _parse_swap_field(swap_text, "total")
+        swap_avail = _parse_swap_field(swap_text, "free")
+        if swap_avail > swap_total:
+            swap_avail = swap_total
 
         def pct(p, t):
             return round(p * 100.0 / t, 1) if t > 0 else 0.0
 
         return {
+            "profile": "posix",
+            "platform": "Darwin",
             "memoryLoad": round(used_phys * 100 / total_phys, 1) if total_phys else 0,
             "physical": {
                 "total": total_phys, "avail": avail_phys,
@@ -130,6 +165,8 @@ class DarwinBackend(PlatformBackend):
             return round(p * 100.0 / t, 1) if t > 0 else 0.0
 
         return {
+            "profile": "posix",
+            "platform": "Linux",
             "memoryLoad": pct(used, total),
             "physical": {
                 "total": total, "avail": avail,
@@ -181,52 +218,86 @@ class DarwinBackend(PlatformBackend):
         return mapping
 
     def get_connections(self):
-        out = _run(["lsof", "-i", "-P", "-n"], timeout=20)
-        if out is None or out.returncode != 0:
+        """lsof -nP -i。macOS 上协议在 NODE 列，地址在 NAME 列（形如 *:8765 或 127.0.0.1:1->1.2.3.4:443）。"""
+        out = _run(["lsof", "-nP", "-i"], timeout=20)
+        if out is None or not (out.stdout or "").strip():
             return []
         conns = []
         for line in out.stdout.splitlines()[1:]:
             parts = line.split()
             if len(parts) < 9:
                 continue
+            proto = parts[7] if parts[7] in ("TCP", "UDP") else ""
+            if not proto:
+                for p in parts:
+                    if p in ("TCP", "UDP"):
+                        proto = p
+                        break
+            if not proto:
+                continue
             try:
                 pid = int(parts[1])
             except ValueError:
                 continue
-            name_field = " ".join(parts[8:])
-            m = re.match(r"(TCP|UDP)\s+([^:]+):(\d+)(?:\s+\((\w+)\))?", name_field)
-            if m:
-                proto, addr, port, state = m.group(1), m.group(2), m.group(3), m.group(4) or ""
-            else:
-                m2 = re.search(r"([\d.]+|\*|\S+):(\d+)", name_field)
-                if not m2:
-                    continue
-                proto = "TCP" if "TCP" in name_field else "UDP"
-                addr, port = m2.group(1), m2.group(2)
-                state = ""
+            endpoint = parts[8]
+            state = parts[9].strip("()") if len(parts) >= 10 and parts[9].startswith("(") else ""
+            local = endpoint.split("->", 1)[0]
             conns.append({
                 "protocol": proto,
-                "local": f"{addr}:{port}",
+                "local": local,
                 "state": state,
                 "pid": pid,
                 "name": parts[0],
             })
         return conns
 
+    def _child_pids(self, pid, depth=0):
+        if depth > 6:
+            return []
+        out = _run(["pgrep", "-P", str(pid)], timeout=5)
+        kids = []
+        if out is None or not out.stdout:
+            return kids
+        for line in out.stdout.splitlines():
+            try:
+                child = int(line.strip())
+            except ValueError:
+                continue
+            kids.append(child)
+            kids.extend(self._child_pids(child, depth + 1))
+        return kids
+
     def kill_pid(self, pid):
         try:
             pid = int(pid)
         except (TypeError, ValueError):
             return {"success": False, "error": "无效的 PID", "pid": pid}
-        if pid <= 0 or pid in PROTECTED_PIDS or pid == SELF_PID:
+        if pid <= 1 or pid in PROTECTED_PIDS or pid == SELF_PID:
             return {"success": False, "error": "受保护的进程，禁止终止", "pid": pid}
-        try:
-            os.kill(pid, signal.SIGKILL)
-            return {"success": True, "pid": pid, "message": "已发送 SIGKILL"}
-        except ProcessLookupError:
-            return {"success": False, "error": "进程不存在", "pid": pid}
-        except PermissionError:
-            return {"success": False, "error": "权限不足，请用 sudo 运行", "pid": pid}
+        comm = os.path.basename(self.proc_name_map().get(pid, ""))
+        if comm in _CRITICAL_PROCS:
+            return {"success": False, "error": f"系统关键进程 {comm}，禁止终止", "pid": pid}
+        targets = []
+        for child in self._child_pids(pid):
+            if child not in targets and child != SELF_PID and child > 1:
+                targets.append(child)
+        targets.append(pid)
+        killed = []
+        denied = False
+        for target in targets:
+            try:
+                os.kill(target, signal.SIGKILL)
+                killed.append(target)
+            except ProcessLookupError:
+                continue
+            except PermissionError:
+                denied = True
+        if killed:
+            extra = f"（含子进程 {len(killed) - (1 if pid in killed else 0)} 个）" if len(killed) > 1 else ""
+            return {"success": True, "pid": pid, "message": "已发送 SIGKILL" + extra, "killed": killed}
+        if denied:
+            return {"success": False, "error": "权限不足。结束其他用户的进程需要用 sudo 启动 OneKit", "pid": pid}
+        return {"success": False, "error": "进程不存在", "pid": pid}
 
     # ── 系统服务 ──────────────────────────────────────────────
 
@@ -274,11 +345,11 @@ class DarwinBackend(PlatformBackend):
                 "state": state,
                 "mode": "Auto",
                 "pid": pid,
-                "protected": False,
+                "protected": label in _MAC_PROTECTED_SERVICES,
             })
         if not services:
             return None
-        return {"services": services, "admin": self.is_admin()}
+        return {"services": services, "admin": self.is_admin(), "platform": "Darwin"}
 
     def _linux_services(self):
         """Linux: systemctl list-units。"""
@@ -306,7 +377,15 @@ class DarwinBackend(PlatformBackend):
             })
         if not services:
             return None
-        return {"services": services, "admin": self.is_admin()}
+        return {"services": services, "admin": self.is_admin(), "platform": "Linux"}
+
+    def _service_target(self, name):
+        """launchctl 现代语法需要域前缀。用户服务走 gui/<uid>，已带域的名字保持原样。"""
+        if "/" in name:
+            return name
+        if _IS_MACOS:
+            return f"gui/{os.getuid()}/{name}"
+        return name
 
     def service_action(self, name, action, mode=""):
         name = (name or "").strip()
@@ -314,17 +393,21 @@ class DarwinBackend(PlatformBackend):
             return {"success": False, "error": "无效的服务名", "name": name}
         if action not in ("start", "stop", "restart", "mode"):
             return {"success": False, "error": "不支持的操作", "name": name}
+        if _IS_MACOS and name in _MAC_PROTECTED_SERVICES:
+            return {"success": False, "error": "受保护的系统服务，禁止操作", "name": name}
 
         if _IS_MACOS:
-            cmd_map = {"start": ["launchctl", "load"],
-                       "stop": ["launchctl", "unload"],
-                       "restart": ["launchctl", "kickstart", "-k"]}
+            target = self._service_target(name)
             if action == "mode":
-                return {"success": False, "error": "macOS 不支持修改启动类型", "name": name}
-            cmd = cmd_map.get(action)
-            if not cmd:
-                return {"success": False, "error": "不支持的操作", "name": name}
-            res = _run(cmd + [name], timeout=30)
+                verb = "disable" if mode == "Disabled" else "enable"
+                res = _run(["launchctl", verb, target], timeout=30)
+            elif action == "stop":
+                res = _run(["launchctl", "bootout", target], timeout=30)
+            elif action == "restart":
+                res = _run(["launchctl", "kickstart", "-k", target], timeout=30)
+            else:
+                _run(["launchctl", "enable", target], timeout=15)
+                res = _run(["launchctl", "kickstart", target], timeout=30)
         else:
             if action == "mode":
                 res = _run(["systemctl", "enable" if mode != "Disabled" else "disable",
@@ -351,38 +434,64 @@ class DarwinBackend(PlatformBackend):
             return self._macos_disks()
         return self._linux_disks()
 
+    def _macos_fstypes(self):
+        out = _run(["mount"], timeout=5)
+        mapping = {}
+        if out is None:
+            return mapping
+        for line in out.stdout.splitlines():
+            m = re.search(r" on (.*) \(([^,)]+)", line)
+            if m:
+                mapping[m.group(1)] = m.group(2)
+        return mapping
+
     def _macos_disks(self):
-        """macOS: 遍历 /Volumes + statvfs。"""
-        disks = []
-        try:
-            volumes = os.listdir("/Volumes")
-        except OSError:
+        """macOS: df -k -P。数据卷才反映用户真正能用的空间，系统快照卷单独标出。"""
+        out = _run(["df", "-k", "-P"], timeout=10)
+        if out is None or not out.stdout:
             return None
-        for vol in volumes:
-            path = os.path.join("/Volumes", vol)
-            if not os.path.ismount(path):
+        fstypes = self._macos_fstypes()
+        disks = []
+        for line in out.stdout.splitlines()[1:]:
+            m = re.match(r"^(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)%\s+(.+)$", line)
+            if not m:
                 continue
-            try:
-                st = os.statvfs(path)
-            except OSError:
+            fs_dev, blocks, used_k, avail_k, cap, mount = m.groups()
+            mount = mount.strip()
+            if fs_dev in ("devfs", "map") or fs_dev.startswith("map "):
                 continue
-            total = st.f_frsize * st.f_blocks
-            free = st.f_frsize * st.f_bavail
-            used = max(0, total - free)
-
-            def pct(p, t):
-                return round(p * 100.0 / t, 1) if t > 0 else 0.0
-
+            if mount in _SKIP_MOUNTS or "TimeMachine" in mount:
+                continue
+            if mount.startswith("/System/Volumes/Data/"):
+                continue
+            used = int(used_k) * 1024
+            free = int(avail_k) * 1024
+            # APFS 的块数是整个容器，Capacity 才是本卷 used/(used+avail)。用后者，避免百分比和容量对不上。
+            total = used + free
+            if total <= 0:
+                continue
+            if mount == "/":
+                label, dtype, rank = "系统卷", "系统盘", 1
+            elif mount == "/System/Volumes/Data":
+                label, dtype, rank = "数据卷", "数据盘", 0
+            elif mount.startswith("/Volumes/"):
+                label, dtype, rank = os.path.basename(mount) or mount, "外置磁盘", 2
+            else:
+                label, dtype, rank = mount, "固定磁盘", 3
             disks.append({
-                "drive": path,
-                "label": vol,
-                "fs": "",
-                "type": "固定磁盘" if vol != "Macintosh HD" else "系统盘",
+                "drive": mount,
+                "label": label,
+                "fs": fstypes.get(mount, ""),
+                "type": dtype,
                 "total": total, "used": used, "free": free,
-                "usedPct": pct(used, total),
+                "usedPct": round(used * 100.0 / total, 1),
                 "ready": True,
+                "_rank": rank,
             })
-        return {"disks": disks} if disks else None
+        disks.sort(key=lambda d: (d["_rank"], d["drive"]))
+        for d in disks:
+            d.pop("_rank", None)
+        return {"disks": disks, "platform": "Darwin"} if disks else None
 
     def _linux_disks(self):
         """Linux: df 输出解析。"""
@@ -417,7 +526,7 @@ class DarwinBackend(PlatformBackend):
                 "usedPct": used_pct,
                 "ready": True,
             })
-        return {"disks": disks} if disks else None
+        return {"disks": disks, "platform": "Linux"} if disks else None
 
     def clean_catalogs(self):
         home = os.environ.get("HOME", "")
@@ -446,7 +555,10 @@ class DarwinBackend(PlatformBackend):
 
     def is_protected_path(self, path):
         low = os.path.abspath(path)
-        guards = ["/System", "/usr", "/bin", "/sbin", "/private/var"]
+        # 数据卷挂在 /System/Volumes/Data，用户文件的真实路径在这里，不能按 /System 一刀切
+        if low == "/System/Volumes/Data" or low.startswith("/System/Volumes/Data/"):
+            return False
+        guards = ["/System", "/usr", "/bin", "/sbin", "/private/var", "/Library"]
         return any(low == g or low.startswith(g + "/") for g in guards)
 
     # ── 进程探针 ──────────────────────────────────────────────
@@ -469,28 +581,31 @@ class DarwinBackend(PlatformBackend):
         return data
 
     def _proc_probe(self):
-        """ps aux 按 RSS 排序取 Top 20。"""
-        out = _run(["ps", "aux", "-r"], timeout=10)
-        if out is None:
+        """按常驻内存（RSS）取 Top 20。macOS 的 ps -m 才是按内存排序。"""
+        cmd = (["ps", "-axm", "-o", "pid=,rss=,comm="] if _IS_MACOS
+               else ["ps", "-eo", "pid=,rss=,comm=", "--sort=-rss"])
+        out = _run(cmd, timeout=10)
+        if out is None or not out.stdout:
             return None
         top = []
-        for line in out.stdout.splitlines()[1:21]:
-            parts = line.split(None, 10)
-            if len(parts) < 11:
+        for line in out.stdout.splitlines():
+            m = re.match(r"\s*(\d+)\s+(\d+)\s+(.*)$", line)
+            if not m:
                 continue
-            try:
-                pid = int(parts[1])
-                rss_kb = int(parts[5])
-            except (ValueError, IndexError):
+            pid = int(m.group(1))
+            rss_kb = int(m.group(2))
+            if rss_kb <= 0:
                 continue
-            name = parts[10].split("/")[-1] if parts[10] else ""
+            name = os.path.basename(m.group(3).strip()) or m.group(3).strip()
             top.append({
                 "pid": pid,
                 "name": name[:60],
-                "commit": rss_kb * 1024,  # macOS 无 PageFileUsage，用 RSS 近似
+                "commit": rss_kb * 1024,
                 "ws": rss_kb * 1024,
                 "peak": 0,
             })
+            if len(top) >= 20:
+                break
 
         os_info = {
             "caption": f"{platform.system()} {platform.release()}",

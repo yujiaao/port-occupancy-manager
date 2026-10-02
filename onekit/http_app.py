@@ -7,12 +7,13 @@
 import json
 import mimetypes
 import os
+import platform
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from . import certinfo, disks, memory, ports, search, services
 from .config import INDEX_PATH, STATIC_DIR
-from .winapi import is_admin
+from .platform import backend
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -115,15 +116,16 @@ class Handler(BaseHTTPRequestHandler):
     def _get_admin(self, query):
         # 轻量级接口：仅返回当前进程是否以管理员/root 权限运行，
         # 用于前端全局展示运行模式（管理员模式 / 受限模式）。
-        self._json(200, {"admin": bool(is_admin())})
+        self._json(200, {"admin": bool(backend.is_admin()), "platform": platform.system()})
 
     def _get_services(self, query):
         force = urllib.parse.parse_qs(query).get("force", [""])[0] == "1"
         snap = services.services_snapshot(force=force)
         if snap is None:
             self._json(200, {
-                "ok": False, "services": [], "admin": is_admin(),
-                "error": "无法获取服务列表（PowerShell 被禁用或非 Windows）",
+                "ok": False, "services": [], "admin": backend.is_admin(),
+                "platform": platform.system(),
+                "error": "无法获取服务列表",
             })
         else:
             self._json(200, dict(ok=True, **snap))
@@ -131,8 +133,8 @@ class Handler(BaseHTTPRequestHandler):
     def _get_disks(self, query):
         snap = disks.disk_snapshot()
         if snap is None:
-            self._json(200, {"ok": False, "disks": [],
-                             "error": "无法获取磁盘信息（仅支持 Windows）"})
+            self._json(200, {"ok": False, "disks": [], "platform": platform.system(),
+                             "error": "无法获取磁盘信息"})
         else:
             self._json(200, dict(ok=True, **snap))
 

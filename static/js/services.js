@@ -19,13 +19,21 @@ export async function fetchServices(force) {
     svcAdmin = !!d.admin;
     svcLoaded = true;
     state.servicesLoaded = true;
-    if (d.ok !== false) setAdminMode(svcAdmin);  // 与服务列表结果保持一致
+    if (d.ok !== false) setAdminMode(svcAdmin, d.platform);
+    const unix = d.platform === "Darwin" || d.platform === "Linux";
     $("svcAdminHint").textContent = svcAdmin
-      ? "已以管理员身份运行，可启动 / 停止服务。"
-      : "未以管理员身份运行：启停与修改启动类型可能被系统拒绝（Access denied）。";
+      ? (unix ? "已用 root 运行，可启停当前用户的启动项。" : "已以管理员身份运行，可启动 / 停止服务。")
+      : (unix
+        ? "当前是普通用户：可以查看 launchd 服务；启停系统服务需要用 sudo 重新打开。"
+        : "未以管理员身份运行：启停与修改启动类型可能被系统拒绝（Access denied）。");
     $("svcBadge").className = "badge " + (d.ok === false || !svcAdmin ? "st-warn" : "st-ok");
     $("svcBadgeTxt").textContent = d.ok === false ? "获取失败"
-      : (svcAdmin ? "管理员模式" : "受限模式");
+      : (svcAdmin ? (unix ? "root 权限" : "管理员模式") : (unix ? "普通用户" : "受限模式"));
+    const note = $("svcNote");
+    if (note && unix && !note.dataset.ready) {
+      note.dataset.ready = "1";
+      note.innerHTML = "这里列出的是当前用户的 <b>launchd</b> 服务（<code>launchctl list</code>）。启动、停止和禁用走 <code>launchctl kickstart / bootout / disable</code>。<br/>会话关键服务（WindowServer、loginwindow、Dock 等）已禁止操作。停止服务前请确认没有别的程序依赖它。";
+    }
     renderServices();
     if (d.ok === false) toast("获取服务列表失败：" + (d.error || "未知原因"), false);
   } catch (e) {
@@ -115,7 +123,12 @@ function openSvcConfirm(name, display, act, mode) {
   let extra = "";
   if (act === "stop") extra = '<p class="warnbox">停止服务可能导致依赖它的功能不可用，请确认无其它服务依赖它。</p>';
   if (act === "mode" && mode === "Disabled") extra = '<p class="warnbox">禁用后该服务不会随系统启动（当前已运行的实例不受影响）。</p>';
-  if (!svcAdmin) extra += '<p class="warnbox">当前未以管理员身份运行，操作可能被系统拒绝。</p>';
+  if (!svcAdmin) {
+    const unix = (window.__onekitPlatform === "Darwin" || window.__onekitPlatform === "Linux");
+    extra += unix
+      ? '<p class="warnbox">当前未以 root 运行，操作系统服务可能被拒绝。</p>'
+      : '<p class="warnbox">当前未以管理员身份运行，操作可能被系统拒绝。</p>';
+  }
   $("svcModalBody").innerHTML =
     '<p>服务：<span class="hl">' + esc(display || name) + '</span></p>' +
     '<p>名称：<span class="hl">' + esc(name) + '</span></p>' + extra;
